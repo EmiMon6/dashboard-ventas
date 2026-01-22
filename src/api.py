@@ -289,10 +289,146 @@ def push_to_n8n():
 
 @app.get("/api/reminders")
 def get_all_reminders():
-    """Get all business reminders in a single request."""
+    """Get all business reminders - SAME DATA as push-to-n8n webhook."""
     df = get_df()
     today = df['fecha'].max()
+    current_month = today.month
+    current_year = today.year
     
+    # --- TOP 40 CLIENTES (ordenados por días sin comprar ASC, primero los de 90+ días) ---
+    cust_stats = df.groupby('cliente_nombre').agg({
+        'venta_neta': 'sum',
+        'fecha': ['max', 'count'],
+        'cantidad': 'sum'
+    }).reset_index()
+    cust_stats.columns = ['cliente', 'total_ventas', 'ultima_compra', 'transacciones', 'cantidad']
+    cust_stats['dias_sin_compra'] = (today - cust_stats['ultima_compra']).dt.days
+    
+    # Filtrar clientes importantes (>5 transacciones O >5000 en ventas)
+    clientes_importantes = cust_stats[(cust_stats['transacciones'] > 5) | (cust_stats['total_ventas'] > 5000)]
+    
+    # Ordenar por días ascendente (90, 91, 92...)
+    clientes_inactivos = clientes_importantes[clientes_importantes['dias_sin_compra'] >= 90].sort_values('dias_sin_compra', ascending=True).head(40)
+    
+    clientes_list = []
+    for _, row in clientes_inactivos.iterrows():
+        clientes_list.append({
+            'cliente': row['cliente'],
+            'dias_sin_compra': int(row['dias_sin_compra']),
+            'total_ventas': round(row['total_ventas'], 2),
+            'transacciones': int(row['transacciones']),
+            'ultima_compra': row['ultima_compra'].strftime('%Y-%m-%d')
+        })
+    
+    # --- TOP 40 PRODUCTOS (ordenados por días sin vender ASC) ---
+    prod_stats = df.groupby('producto').agg({
+        'venta_neta': 'sum',
+        'fecha': ['max', 'count'],
+        'cantidad': 'sum'
+    }).reset_index()
+    prod_stats.columns = ['producto', 'total_ventas', 'ultima_venta', 'transacciones', 'cantidad']
+    prod_stats['dias_sin_venta'] = (today - prod_stats['ultima_venta']).dt.days
+    
+    # Filtrar productos importantes (>10 transacciones O >5000 en ventas)
+    productos_importantes = prod_stats[(prod_stats['transacciones'] > 10) | (prod_stats['total_ventas'] > 5000)]
+    
+    # Ordenar por días ascendente
+    productos_sin_venta = productos_importantes[productos_importantes['dias_sin_venta'] >= 60].sort_values('dias_sin_venta', ascending=True).head(40)
+    
+    productos_list = []
+    for _, row in productos_sin_venta.iterrows():
+        productos_list.append({
+            'producto': row['producto'],
+            'dias_sin_venta': int(row['dias_sin_venta']),
+            'total_ventas': round(row['total_ventas'], 2),
+            'transacciones': int(row['transacciones']),
+            'ultima_venta': row['ultima_venta'].strftime('%Y-%m-%d')
+        })
+    
+    # --- CLIENTES QUE ACABAN DE COMPRAR (últimos 7 días, top ventas) ---
+    clientes_recientes = clientes_importantes[clientes_importantes['dias_sin_compra'] <= 7].sort_values('total_ventas', ascending=False).head(15)
+    recientes_clientes = []
+    for _, row in clientes_recientes.iterrows():
+        recientes_clientes.append({
+            'cliente': row['cliente'],
+            'dias_sin_compra': int(row['dias_sin_compra']),
+            'total_ventas': round(row['total_ventas'], 2)
+        })
+    
+    # --- PRODUCTOS QUE ACABAN DE SALIR (últimos 7 días, top ventas) ---
+    productos_recientes = productos_importantes[productos_importantes['dias_sin_venta'] <= 7].sort_values('total_ventas', ascending=False).head(15)
+    recientes_productos = []
+    for _, row in productos_recientes.iterrows():
+        recientes_productos.append({
+            'producto': row['producto'],
+            'dias_sin_venta': int(row['dias_sin_venta']),
+            'total_ventas': round(row['total_ventas'], 2)
+        })
+    
+    # --- TOP CLIENTES SIN IMPORTAR FECHA (los que más compran en total) ---
+    top_clientes_siempre = clientes_importantes.nlargest(20, 'total_ventas')
+    top_clientes_list = []
+    for _, row in top_clientes_siempre.iterrows():
+        top_clientes_list.append({
+            'cliente': row['cliente'],
+            'total_ventas': round(row['total_ventas'], 2),
+            'transacciones': int(row['transacciones']),
+            'dias_sin_compra': int(row['dias_sin_compra'])
+        })
+    
+    # --- TOP PRODUCTOS SIN IMPORTAR FECHA ---
+    top_productos_siempre = productos_importantes.nlargest(20, 'total_ventas')
+    top_productos_list = []
+    for _, row in top_productos_siempre.iterrows():
+        top_productos_list.append({
+            'producto': row['producto'],
+            'total_ventas': round(row['total_ventas'], 2),
+            'transacciones': int(row['transacciones']),
+            'dias_sin_venta': int(row['dias_sin_venta'])
+        })
+    
+    # --- VENTAS MENSUALES - COMPARACIÓN 3 MESES ---
+    def get_month_num(current, offset):
+        m = current - offset
+        if m <= 0:
+            m += 12
+        return m
+    
+    mes_actual = current_month
+    mes_anterior = get_month_num(current_month, 1)
+    mes_anterior_2 = get_month_num(current_month, 2)
+    
+    df_mes_actual = df[df['fecha'].dt.month == mes_actual]
+    df_mes_ant1 = df[df['fecha'].dt.month == mes_anterior]
+    df_mes_ant2 = df[df['fecha'].dt.month == mes_anterior_2]
+    
+    # --- COMPARACIÓN DE CLIENTES (3 MESES) ---
+    clientes_m0 = df_mes_actual.groupby('cliente_nombre')['venta_neta'].sum().nlargest(20).reset_index()
+    clientes_m0.columns = ['cliente', 'mes_actual']
+    clientes_m1 = df_mes_ant1.groupby('cliente_nombre')['venta_neta'].sum().reset_index()
+    clientes_m1.columns = ['cliente', 'mes_anterior']
+    clientes_m2 = df_mes_ant2.groupby('cliente_nombre')['venta_neta'].sum().reset_index()
+    clientes_m2.columns = ['cliente', 'hace_2_meses']
+    
+    comp_clientes = clientes_m0.merge(clientes_m1, on='cliente', how='left').merge(clientes_m2, on='cliente', how='left').fillna(0)
+    comp_clientes['cambio_vs_anterior'] = comp_clientes['mes_actual'] - comp_clientes['mes_anterior']
+    comp_clientes['cambio_vs_hace_2'] = comp_clientes['mes_actual'] - comp_clientes['hace_2_meses']
+    comparacion_clientes_list = comp_clientes.round(2).to_dict('records')
+    
+    # --- COMPARACIÓN DE PRODUCTOS (3 MESES) ---
+    prods_m0 = df_mes_actual.groupby('producto')['venta_neta'].sum().nlargest(20).reset_index()
+    prods_m0.columns = ['producto', 'mes_actual']
+    prods_m1 = df_mes_ant1.groupby('producto')['venta_neta'].sum().reset_index()
+    prods_m1.columns = ['producto', 'mes_anterior']
+    prods_m2 = df_mes_ant2.groupby('producto')['venta_neta'].sum().reset_index()
+    prods_m2.columns = ['producto', 'hace_2_meses']
+    
+    comp_productos = prods_m0.merge(prods_m1, on='producto', how='left').merge(prods_m2, on='producto', how='left').fillna(0)
+    comp_productos['cambio_vs_anterior'] = comp_productos['mes_actual'] - comp_productos['mes_anterior']
+    comp_productos['cambio_vs_hace_2'] = comp_productos['mes_actual'] - comp_productos['hace_2_meses']
+    comparacion_productos_list = comp_productos.round(2).to_dict('records')
+    
+    # --- RESULTADO COMPLETO (MISMO QUE WEBHOOK) ---
     result = {
         "fecha_generacion": datetime.now().isoformat(),
         "periodo_datos": {
@@ -300,8 +436,51 @@ def get_all_reminders():
             "hasta": df['fecha'].max().strftime('%Y-%m-%d')
         },
         "meta_ventas_mes": get_monthly_comparison_data(df, today),
-        "clientes_inactivos": get_inactive_customers_data(df, today),
-        "productos_sin_movimiento": get_stale_products_data(df, today),
+        
+        "clientes_inactivos_40": {
+            "descripcion": "Top 40 clientes importantes sin comprar >=90 días, ordenados por días (asc)",
+            "total": len(clientes_list),
+            "lista": clientes_list
+        },
+        
+        "productos_sin_movimiento_40": {
+            "descripcion": "Top 40 productos importantes sin vender >=60 días, ordenados por días (asc)",
+            "total": len(productos_list),
+            "lista": productos_list
+        },
+        
+        "clientes_recientes": {
+            "descripcion": "Clientes que compraron en los últimos 7 días (top por ventas totales)",
+            "lista": recientes_clientes
+        },
+        
+        "productos_recientes": {
+            "descripcion": "Productos vendidos en los últimos 7 días (top por ventas totales)",
+            "lista": recientes_productos
+        },
+        
+        "top_clientes_historico": {
+            "descripcion": "Top 20 clientes por ventas totales (sin importar fecha)",
+            "lista": top_clientes_list
+        },
+        
+        "top_productos_historico": {
+            "descripcion": "Top 20 productos por ventas totales (sin importar fecha)",
+            "lista": top_productos_list
+        },
+        
+        "comparacion_mensual_clientes": {
+            "descripcion": "Top 20 clientes - comparación 3 meses (mes actual, anterior, hace 2 meses)",
+            "meses": {"actual": mes_actual, "anterior": mes_anterior, "hace_2": mes_anterior_2},
+            "lista": comparacion_clientes_list
+        },
+        
+        "comparacion_mensual_productos": {
+            "descripcion": "Top 20 productos - comparación 3 meses (mes actual, anterior, hace 2 meses)",
+            "meses": {"actual": mes_actual, "anterior": mes_anterior, "hace_2": mes_anterior_2},
+            "lista": comparacion_productos_list
+        },
+        
         "resumen_ejecutivo": generate_executive_summary(df, today)
     }
     
