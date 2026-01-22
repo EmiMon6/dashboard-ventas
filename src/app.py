@@ -12,6 +12,90 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- PASSWORD PROTECTION ---
+DASHBOARD_PIN = "101010"
+
+def check_password():
+    """Returns True if the user has entered the correct password."""
+    
+    def password_entered():
+        """Checks whether the password is correct."""
+        if st.session_state.get("password") == DASHBOARD_PIN:
+            st.session_state["password_correct"] = True
+            del st.session_state["password"]  # Don't store password
+        else:
+            st.session_state["password_correct"] = False
+    
+    # First run or not authenticated
+    if "password_correct" not in st.session_state:
+        st.markdown("""
+        <style>
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+        }
+        .login-title {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: #00d4aa;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+        st.markdown("<p class='login-title'>🔐 Dashboard de Ventas</p>", unsafe_allow_html=True)
+        st.text_input(
+            "Ingresa el PIN de acceso:",
+            type="password",
+            on_change=password_entered,
+            key="password",
+            placeholder="••••••"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return False
+    
+    # Wrong password entered
+    elif not st.session_state["password_correct"]:
+        st.markdown("""
+        <style>
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+        }
+        .login-title {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            color: #00d4aa;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+        st.markdown("<p class='login-title'>🔐 Dashboard de Ventas</p>", unsafe_allow_html=True)
+        st.text_input(
+            "Ingresa el PIN de acceso:",
+            type="password",
+            on_change=password_entered,
+            key="password",
+            placeholder="••••••"
+        )
+        st.error("❌ PIN incorrecto. Intenta de nuevo.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return False
+    
+    # Password correct
+    return True
+
+# Check password before showing anything
+if not check_password():
+    st.stop()
+
 # Custom CSS for Dark/Premium Look
 st.markdown("""
     <style>
