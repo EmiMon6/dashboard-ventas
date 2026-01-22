@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  dashboard-ventas:
+    build: .
+    container_name: dashboard-ventas
+    ports:
+      - "8501:8501"  # Streamlit Dashboard
+      - "8502:8502"  # FastAPI
+    volumes:
+      - ./data:/app/data  # Persist data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
