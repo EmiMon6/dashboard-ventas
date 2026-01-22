@@ -38,9 +38,26 @@ DATA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 # N8N Webhook Configuration (production URL - workflow must be active)
 N8N_WEBHOOK_URL = "https://em-n8n.yny2jy.easypanel.host/webhook/1ab642e1-0cfc-48ca-a5b9-4f8ccfefca2c"
 
+# Global cache for API data (separate from Streamlit cache)
+_api_df_cache = None
+_api_df_cache_path = None
+
 def get_df():
-    """Load and return the dataframe."""
-    return load_data(DATA_PATH)
+    """Load and return the dataframe. Uses a simple cache that can be cleared."""
+    global _api_df_cache, _api_df_cache_path
+    
+    # If cache is empty or file changed, reload
+    if _api_df_cache is None or _api_df_cache_path != DATA_PATH:
+        _api_df_cache = load_data(DATA_PATH)
+        _api_df_cache_path = DATA_PATH
+    
+    return _api_df_cache
+
+def clear_api_cache():
+    """Clear the API data cache to force reload on next request."""
+    global _api_df_cache, _api_df_cache_path
+    _api_df_cache = None
+    _api_df_cache_path = None
 
 
 @app.get("/")
@@ -53,6 +70,7 @@ def root():
 async def upload_data(file: UploadFile = File(...)):
     """
     Upload a new CSV file to update the dashboard data.
+    Clears API cache to ensure fresh data on next request.
     """
     try:
         # Determine strict path
@@ -61,8 +79,22 @@ async def upload_data(file: UploadFile = File(...)):
         # Save the uploaded file
         with open(save_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        
+        # Clear the API cache to force reload
+        clear_api_cache()
+        
+        # Also try to clear Streamlit cache if available
+        try:
+            import streamlit as st
+            st.cache_data.clear()
+        except:
+            pass  # Streamlit not available in API context
             
-        return {"success": True, "message": f"Archivo actualizado en {save_path}"}
+        return {
+            "success": True, 
+            "message": f"Archivo actualizado en {save_path}",
+            "cache_cleared": True
+        }
         
     except Exception as e:
         return {"success": False, "error": str(e)}
