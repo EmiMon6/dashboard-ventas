@@ -14,37 +14,86 @@ st.set_page_config(
 
 # --- PASSWORD PROTECTION ---
 DASHBOARD_PIN = "101010"
+MAX_ATTEMPTS = 5
+LOCKOUT_MINUTES = 5
 
 def check_password():
     """Returns True if the user has entered the correct password."""
+    from datetime import datetime, timedelta
+    
+    # Initialize attempt counter and lockout time if not exists
+    if "failed_attempts" not in st.session_state:
+        st.session_state["failed_attempts"] = 0
+    if "lockout_until" not in st.session_state:
+        st.session_state["lockout_until"] = None
+    
+    # Check if currently locked out
+    if st.session_state["lockout_until"]:
+        if datetime.now() < st.session_state["lockout_until"]:
+            remaining = (st.session_state["lockout_until"] - datetime.now()).seconds // 60 + 1
+            st.markdown("""
+            <style>
+            .login-container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                height: 60vh;
+            }
+            .login-title {
+                font-size: 2.5rem;
+                margin-bottom: 1rem;
+                color: #ef553b;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("<div class='login-container'>", unsafe_allow_html=True)
+            st.markdown("<p class='login-title'>🔒 Acceso Bloqueado</p>", unsafe_allow_html=True)
+            st.error(f"⛔ Demasiados intentos fallidos. Espera {remaining} minuto(s) para intentar de nuevo.")
+            st.markdown("</div>", unsafe_allow_html=True)
+            return False
+        else:
+            # Lockout expired, reset
+            st.session_state["failed_attempts"] = 0
+            st.session_state["lockout_until"] = None
     
     def password_entered():
         """Checks whether the password is correct."""
         if st.session_state.get("password") == DASHBOARD_PIN:
             st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store password
+            st.session_state["failed_attempts"] = 0  # Reset on success
+            del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
+            st.session_state["failed_attempts"] += 1
+            # Lock out after MAX_ATTEMPTS
+            if st.session_state["failed_attempts"] >= MAX_ATTEMPTS:
+                st.session_state["lockout_until"] = datetime.now() + timedelta(minutes=LOCKOUT_MINUTES)
+            if "password" in st.session_state:
+                del st.session_state["password"]
+    
+    # Login form styles
+    login_styles = """
+    <style>
+    .login-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 60vh;
+    }
+    .login-title {
+        font-size: 2.5rem;
+        margin-bottom: 1rem;
+        color: #00d4aa;
+    }
+    </style>
+    """
     
     # First run or not authenticated
     if "password_correct" not in st.session_state:
-        st.markdown("""
-        <style>
-        .login-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 60vh;
-        }
-        .login-title {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            color: #00d4aa;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
+        st.markdown(login_styles, unsafe_allow_html=True)
         st.markdown("<div class='login-container'>", unsafe_allow_html=True)
         st.markdown("<p class='login-title'>🔐 Dashboard de Ventas</p>", unsafe_allow_html=True)
         st.text_input(
@@ -59,23 +108,7 @@ def check_password():
     
     # Wrong password entered
     elif not st.session_state["password_correct"]:
-        st.markdown("""
-        <style>
-        .login-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 60vh;
-        }
-        .login-title {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            color: #00d4aa;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-        
+        st.markdown(login_styles, unsafe_allow_html=True)
         st.markdown("<div class='login-container'>", unsafe_allow_html=True)
         st.markdown("<p class='login-title'>🔐 Dashboard de Ventas</p>", unsafe_allow_html=True)
         st.text_input(
@@ -85,7 +118,9 @@ def check_password():
             key="password",
             placeholder="••••••"
         )
-        st.error("❌ PIN incorrecto. Intenta de nuevo.")
+        attempts_left = MAX_ATTEMPTS - st.session_state["failed_attempts"]
+        if attempts_left > 0:
+            st.error(f"❌ PIN incorrecto. Te quedan {attempts_left} intento(s).")
         st.markdown("</div>", unsafe_allow_html=True)
         return False
     
