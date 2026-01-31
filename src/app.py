@@ -1850,7 +1850,7 @@ def render_ml_predictions():
                        mode='lines', name='Límite Inferior', line=dict(dash='dash', color='rgba(255,107,107,0.3)'),
                        fill='tonexty', fillcolor='rgba(255,107,107,0.1)')
         
-        fig.update_layout(title='Ventas Mensuales + Proyección con Intervalo de Confianza 95%',
+        fig.update_layout(title='Ventas Mensuales + Proyección con Intervalo de Confianza 80%',
                          xaxis_title='Fecha', yaxis_title='Ventas ($)')
         st.plotly_chart(fig, use_container_width=True)
         
