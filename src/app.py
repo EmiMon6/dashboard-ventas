@@ -188,6 +188,12 @@ elif selected_section == "📁 Categorías":
     category_options = ["📊 Por Categoría", "📦 Agrupadas"]
     selected_sub = st.sidebar.radio("Sub-sección Categorías:", category_options, label_visibility="collapsed")
     selected_view = f"Categorías_{selected_sub}"
+
+elif selected_section == "🔮 Predicciones ML":
+    st.sidebar.markdown("---")
+    ml_options = ["📈 Ventas Futuras", "📉 Riesgo de Churn", "🛒 Productos Asociados", "📦 Demanda por Producto", "💰 Valor del Cliente", "🗓️ Estacionalidad", "⏰ Próxima Compra"]
+    selected_sub = st.sidebar.radio("Sub-sección ML:", ml_options, label_visibility="collapsed")
+    selected_view = f"ML_{selected_sub}"
 else:
     client_search = ""  # Initialize for non-client sections
 
@@ -1646,6 +1652,482 @@ def render_ml_predictions():
         """)
 
 
+# --- ADDITIONAL ML FUNCTIONS ---
+
+def render_churn_prediction():
+    """Predict which customers are at risk of churning."""
+    st.title("📉 Predicción de Churn (Riesgo de Pérdida)")
+    st.caption("Identifica clientes con alta probabilidad de dejar de comprar")
+    
+    try:
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+        import numpy as np
+    except ImportError:
+        st.error("⚠️ scikit-learn no está instalado")
+        return
+    
+    today = df['fecha'].max()
+    
+    # Build customer features
+    cust_stats = df.groupby('cliente_nombre').agg({
+        'venta_neta': ['sum', 'mean', 'std'],
+        'fecha': ['max', 'min', 'count'],
+        'cantidad': 'sum',
+        'producto': 'nunique'
+    }).reset_index()
+    cust_stats.columns = ['cliente', 'total_ventas', 'venta_promedio', 'venta_std', 
+                          'ultima_compra', 'primera_compra', 'transacciones', 
+                          'cantidad', 'productos_unicos']
+    
+    cust_stats['dias_sin_compra'] = (today - cust_stats['ultima_compra']).dt.days
+    cust_stats['dias_como_cliente'] = (cust_stats['ultima_compra'] - cust_stats['primera_compra']).dt.days
+    cust_stats['frecuencia'] = cust_stats['transacciones'] / (cust_stats['dias_como_cliente'] + 1) * 30
+    cust_stats['venta_std'] = cust_stats['venta_std'].fillna(0)
+    
+    # Define churn: no purchase in 90+ days AND was previously active (>3 transactions)
+    cust_stats['churned'] = ((cust_stats['dias_sin_compra'] > 90) & (cust_stats['transacciones'] > 3)).astype(int)
+    
+    # Features for prediction
+    feature_cols = ['total_ventas', 'venta_promedio', 'transacciones', 'productos_unicos', 'frecuencia']
+    X = cust_stats[feature_cols].fillna(0)
+    y = cust_stats['churned']
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Train model
+    model = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=5)
+    model.fit(X_scaled, y)
+    
+    # Predict probability
+    cust_stats['prob_churn'] = model.predict_proba(X_scaled)[:, 1]
+    cust_stats['riesgo'] = pd.cut(cust_stats['prob_churn'], 
+                                   bins=[0, 0.3, 0.6, 1.0], 
+                                   labels=['🟢 Bajo', '🟡 Medio', '🔴 Alto'])
+    
+    # Display metrics
+    high_risk = cust_stats[cust_stats['prob_churn'] > 0.6]
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Clientes", len(cust_stats))
+    col2.metric("Alto Riesgo", len(high_risk))
+    col3.metric("Valor en Riesgo", f"${high_risk['total_ventas'].sum():,.0f}")
+    col4.metric("% en Riesgo", f"{len(high_risk)/len(cust_stats)*100:.1f}%")
+    
+    st.markdown("---")
+    
+    # Risk distribution
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📊 Distribución de Riesgo")
+        risk_counts = cust_stats['riesgo'].value_counts().reset_index()
+        risk_counts.columns = ['Riesgo', 'Clientes']
+        fig = px.pie(risk_counts, values='Clientes', names='Riesgo', 
+                     template='plotly_dark',
+                     color_discrete_map={'🟢 Bajo': '#00cc96', '🟡 Medio': '#ffa500', '🔴 Alto': '#ef553b'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_right:
+        st.subheader("💰 Valor por Nivel de Riesgo")
+        risk_value = cust_stats.groupby('riesgo')['total_ventas'].sum().reset_index()
+        fig = px.bar(risk_value, x='riesgo', y='total_ventas', template='plotly_dark',
+                     color='riesgo', color_discrete_map={'🟢 Bajo': '#00cc96', '🟡 Medio': '#ffa500', '🔴 Alto': '#ef553b'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # High risk customers table
+    st.subheader("🚨 Clientes en Alto Riesgo")
+    high_risk_display = high_risk.nlargest(20, 'total_ventas')[['cliente', 'total_ventas', 'transacciones', 'dias_sin_compra', 'prob_churn']].copy()
+    high_risk_display['total_ventas'] = high_risk_display['total_ventas'].apply(lambda x: f"${x:,.0f}")
+    high_risk_display['prob_churn'] = high_risk_display['prob_churn'].apply(lambda x: f"{x:.0%}")
+    high_risk_display.columns = ['Cliente', 'Ventas Totales', 'Transacciones', 'Días Inactivo', 'Prob. Churn']
+    st.dataframe(high_risk_display, hide_index=True, use_container_width=True)
+
+
+def render_product_associations():
+    """Find products that are frequently bought together."""
+    st.title("🛒 Productos que se Compran Juntos")
+    st.caption("Análisis de asociación para cross-selling")
+    
+    # Group by invoice to find co-purchases
+    invoice_products = df.groupby('factura_id')['producto'].apply(list).reset_index()
+    
+    # Count co-occurrences
+    from collections import defaultdict
+    cooccurrence = defaultdict(int)
+    product_counts = defaultdict(int)
+    
+    for products in invoice_products['producto']:
+        unique_products = list(set(products))
+        for p in unique_products:
+            product_counts[p] += 1
+        for i, p1 in enumerate(unique_products):
+            for p2 in unique_products[i+1:]:
+                pair = tuple(sorted([p1, p2]))
+                cooccurrence[pair] += 1
+    
+    # Convert to dataframe
+    pairs_data = []
+    for (p1, p2), count in cooccurrence.items():
+        if count >= 3:  # Minimum 3 co-occurrences
+            support = count / len(invoice_products)
+            confidence_1 = count / product_counts[p1] if product_counts[p1] > 0 else 0
+            confidence_2 = count / product_counts[p2] if product_counts[p2] > 0 else 0
+            pairs_data.append({
+                'producto_1': p1,
+                'producto_2': p2,
+                'veces_juntos': count,
+                'soporte': support,
+                'confianza': max(confidence_1, confidence_2)
+            })
+    
+    pairs_df = pd.DataFrame(pairs_data).sort_values('veces_juntos', ascending=False)
+    
+    if pairs_df.empty:
+        st.warning("No se encontraron suficientes asociaciones de productos")
+        return
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Pares Encontrados", len(pairs_df))
+    col2.metric("Par Más Frecuente", f"{pairs_df.iloc[0]['veces_juntos']} veces")
+    col3.metric("Mejor Confianza", f"{pairs_df['confianza'].max():.0%}")
+    
+    st.markdown("---")
+    
+    # Top pairs
+    st.subheader("🔗 Top 20 Pares de Productos")
+    top_pairs = pairs_df.head(20).copy()
+    top_pairs['soporte'] = top_pairs['soporte'].apply(lambda x: f"{x:.1%}")
+    top_pairs['confianza'] = top_pairs['confianza'].apply(lambda x: f"{x:.0%}")
+    top_pairs.columns = ['Producto 1', 'Producto 2', 'Veces Juntos', 'Soporte', 'Confianza']
+    st.dataframe(top_pairs, hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Product selector for recommendations
+    st.subheader("🎯 Buscar Recomendaciones")
+    all_products = sorted(df['producto'].unique())
+    selected_product = st.selectbox("Selecciona un producto:", all_products)
+    
+    if selected_product:
+        # Find top associated products
+        associated = pairs_df[(pairs_df['producto_1'] == selected_product) | (pairs_df['producto_2'] == selected_product)].copy()
+        if not associated.empty:
+            associated['otro_producto'] = associated.apply(
+                lambda x: x['producto_2'] if x['producto_1'] == selected_product else x['producto_1'], axis=1)
+            associated = associated.nlargest(10, 'veces_juntos')
+            
+            st.success(f"**Clientes que compran '{selected_product[:30]}...' también compran:**")
+            for _, row in associated.iterrows():
+                st.write(f"• {row['otro_producto']} ({row['veces_juntos']} veces)")
+        else:
+            st.info("No se encontraron asociaciones significativas para este producto")
+
+
+def render_product_demand():
+    """Predict demand for each product."""
+    st.title("📦 Predicción de Demanda por Producto")
+    st.caption("Proyección de ventas para los próximos meses por producto")
+    
+    try:
+        from sklearn.linear_model import LinearRegression
+        import numpy as np
+    except ImportError:
+        st.error("⚠️ scikit-learn no está instalado")
+        return
+    
+    # Get top products
+    top_products = df.groupby('producto')['venta_neta'].sum().nlargest(20).index.tolist()
+    
+    selected_product = st.selectbox("Selecciona un producto:", top_products)
+    
+    if selected_product:
+        prod_df = df[df['producto'] == selected_product]
+        
+        # Monthly sales for this product
+        monthly = prod_df.groupby(prod_df['fecha'].dt.to_period('M')).agg({
+            'venta_neta': 'sum',
+            'cantidad': 'sum'
+        }).reset_index()
+        monthly['fecha'] = monthly['fecha'].astype(str)
+        monthly['month_num'] = range(1, len(monthly) + 1)
+        
+        if len(monthly) < 3:
+            st.warning("Se necesitan al menos 3 meses de datos")
+            return
+        
+        # Train model
+        X = monthly['month_num'].values.reshape(-1, 1)
+        y = monthly['venta_neta'].values
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        # Predictions
+        next_months = [len(monthly) + i for i in range(1, 4)]
+        predictions = [model.predict([[m]])[0] for m in next_months]
+        
+        current_sales = monthly.iloc[-1]['venta_neta']
+        change_pct = ((predictions[0] - current_sales) / current_sales) * 100 if current_sales > 0 else 0
+        r2 = model.score(X, y)
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Ventas Actual", f"${current_sales:,.0f}")
+        col2.metric("Predicción Próx. Mes", f"${predictions[0]:,.0f}", delta=f"{change_pct:+.1f}%")
+        col3.metric("Tendencia", "📈 Subiendo" if model.coef_[0] > 0 else "📉 Bajando")
+        col4.metric("Confianza (R²)", f"{r2:.0%}")
+        
+        st.markdown("---")
+        
+        # Chart
+        future_data = pd.DataFrame({
+            'fecha': [f'Pred {i}' for i in range(1, 4)],
+            'month_num': next_months,
+            'venta_neta': predictions,
+            'tipo': ['Predicción'] * 3
+        })
+        
+        chart_data = monthly.copy()
+        chart_data['tipo'] = 'Real'
+        chart_data = pd.concat([chart_data, future_data], ignore_index=True)
+        
+        fig = px.line(chart_data, x='fecha', y='venta_neta', color='tipo', markers=True,
+                      title=f'Ventas de {selected_product[:40]}',
+                      template='plotly_dark',
+                      color_discrete_map={'Real': '#00d4aa', 'Predicción': '#ff6b6b'})
+        st.plotly_chart(fig, use_container_width=True)
+
+
+def render_clv_prediction():
+    """Predict Customer Lifetime Value."""
+    st.title("💰 Valor de Vida del Cliente (CLV)")
+    st.caption("Estimación del valor futuro de cada cliente")
+    
+    today = df['fecha'].max()
+    
+    # Calculate customer metrics
+    cust_stats = df.groupby('cliente_nombre').agg({
+        'venta_neta': ['sum', 'mean'],
+        'fecha': ['max', 'min', 'count']
+    }).reset_index()
+    cust_stats.columns = ['cliente', 'total_ventas', 'venta_promedio', 'ultima_compra', 'primera_compra', 'transacciones']
+    
+    # Calculate CLV components
+    cust_stats['dias_como_cliente'] = (cust_stats['ultima_compra'] - cust_stats['primera_compra']).dt.days + 1
+    cust_stats['frecuencia_mensual'] = cust_stats['transacciones'] / (cust_stats['dias_como_cliente'] / 30)
+    cust_stats['dias_sin_compra'] = (today - cust_stats['ultima_compra']).dt.days
+    
+    # Simple CLV: Average order value × Purchase frequency × Expected lifespan
+    # Assuming 2 year expected lifespan for active customers
+    cust_stats['clv_estimado'] = cust_stats['venta_promedio'] * cust_stats['frecuencia_mensual'] * 24
+    
+    # Adjust for inactive customers
+    cust_stats.loc[cust_stats['dias_sin_compra'] > 180, 'clv_estimado'] *= 0.2
+    cust_stats.loc[(cust_stats['dias_sin_compra'] > 90) & (cust_stats['dias_sin_compra'] <= 180), 'clv_estimado'] *= 0.5
+    
+    # Segment by CLV
+    cust_stats['segmento_valor'] = pd.qcut(cust_stats['clv_estimado'], q=4, 
+                                            labels=['💎 Platino', '🥇 Oro', '🥈 Plata', '🥉 Bronce'],
+                                            duplicates='drop')
+    
+    # Metrics
+    col1, col2, col3 = st.columns(3)
+    col1.metric("CLV Promedio", f"${cust_stats['clv_estimado'].mean():,.0f}")
+    col2.metric("CLV Máximo", f"${cust_stats['clv_estimado'].max():,.0f}")
+    col3.metric("Valor Total Proyectado", f"${cust_stats['clv_estimado'].sum():,.0f}")
+    
+    st.markdown("---")
+    
+    # Distribution
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📊 Distribución de CLV")
+        fig = px.histogram(cust_stats, x='clv_estimado', nbins=30, template='plotly_dark',
+                          labels={'clv_estimado': 'CLV Estimado ($)'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_right:
+        st.subheader("🏆 Valor por Segmento")
+        seg_stats = cust_stats.groupby('segmento_valor').agg({
+            'cliente': 'count',
+            'clv_estimado': 'sum'
+        }).reset_index()
+        seg_stats.columns = ['Segmento', 'Clientes', 'CLV Total']
+        fig = px.bar(seg_stats, x='Segmento', y='CLV Total', template='plotly_dark', color='Segmento')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Top customers by CLV
+    st.subheader("🌟 Top 20 Clientes por CLV")
+    top_clv = cust_stats.nlargest(20, 'clv_estimado')[['cliente', 'total_ventas', 'transacciones', 'frecuencia_mensual', 'clv_estimado', 'segmento_valor']].copy()
+    top_clv['total_ventas'] = top_clv['total_ventas'].apply(lambda x: f"${x:,.0f}")
+    top_clv['clv_estimado'] = top_clv['clv_estimado'].apply(lambda x: f"${x:,.0f}")
+    top_clv['frecuencia_mensual'] = top_clv['frecuencia_mensual'].apply(lambda x: f"{x:.1f}")
+    top_clv.columns = ['Cliente', 'Ventas Históricas', 'Transacciones', 'Freq/Mes', 'CLV Estimado', 'Segmento']
+    st.dataframe(top_clv, hide_index=True, use_container_width=True)
+
+
+def render_seasonality():
+    """Analyze sales seasonality patterns."""
+    st.title("🗓️ Análisis de Estacionalidad")
+    st.caption("Patrones de ventas por mes, día de la semana y hora")
+    
+    df_season = df.copy()
+    df_season['mes'] = df_season['fecha'].dt.month
+    df_season['nombre_mes'] = df_season['fecha'].dt.month_name()
+    df_season['dia_semana'] = df_season['fecha'].dt.dayofweek
+    df_season['nombre_dia'] = df_season['fecha'].dt.day_name()
+    df_season['semana_mes'] = (df_season['fecha'].dt.day - 1) // 7 + 1
+    
+    # Monthly pattern
+    st.subheader("📅 Patrón Mensual")
+    monthly = df_season.groupby(['mes', 'nombre_mes'])['venta_neta'].sum().reset_index()
+    monthly = monthly.sort_values('mes')
+    avg = monthly['venta_neta'].mean()
+    monthly['status'] = monthly['venta_neta'].apply(
+        lambda x: 'Alto' if x > avg * 1.1 else ('Bajo' if x < avg * 0.9 else 'Normal'))
+    
+    # Best/worst months
+    best_month = monthly.loc[monthly['venta_neta'].idxmax(), 'nombre_mes']
+    worst_month = monthly.loc[monthly['venta_neta'].idxmin(), 'nombre_mes']
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Mejor Mes", best_month)
+    col2.metric("Peor Mes", worst_month)
+    col3.metric("Variación", f"{((monthly['venta_neta'].max() - monthly['venta_neta'].min()) / avg * 100):.0f}%")
+    
+    fig = px.bar(monthly, x='nombre_mes', y='venta_neta', color='status',
+                 template='plotly_dark',
+                 color_discrete_map={'Alto': '#00cc96', 'Normal': '#636efa', 'Bajo': '#ef553b'})
+    fig.add_hline(y=avg, line_dash="dash", line_color="yellow", annotation_text="Promedio")
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Day of week pattern
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📆 Patrón por Día de Semana")
+        daily = df_season.groupby(['dia_semana', 'nombre_dia'])['venta_neta'].sum().reset_index()
+        daily = daily.sort_values('dia_semana')
+        fig = px.bar(daily, x='nombre_dia', y='venta_neta', template='plotly_dark', color='venta_neta')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_right:
+        st.subheader("📈 Semana del Mes")
+        weekly = df_season.groupby('semana_mes')['venta_neta'].sum().reset_index()
+        weekly['semana_mes'] = weekly['semana_mes'].apply(lambda x: f"Semana {x}")
+        fig = px.bar(weekly, x='semana_mes', y='venta_neta', template='plotly_dark', color='venta_neta')
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # Insights
+    st.markdown("---")
+    st.subheader("💡 Insights de Estacionalidad")
+    
+    best_day = daily.loc[daily['venta_neta'].idxmax(), 'nombre_dia']
+    worst_day = daily.loc[daily['venta_neta'].idxmin(), 'nombre_dia']
+    
+    st.info(f"""
+    **Hallazgos clave:**
+    - 📈 **Mejor mes:** {best_month} (considerar aumentar inventario)
+    - 📉 **Peor mes:** {worst_month} (buen momento para promociones)
+    - 📅 **Mejor día:** {best_day}
+    - 📅 **Peor día:** {worst_day}
+    """)
+
+
+def render_next_purchase():
+    """Predict when customers will make their next purchase."""
+    st.title("⏰ Predicción de Próxima Compra")
+    st.caption("Estima cuándo volverá a comprar cada cliente")
+    
+    today = df['fecha'].max()
+    
+    # Calculate purchase intervals per customer
+    def calc_avg_interval(group):
+        if len(group) < 2:
+            return None
+        dates = group['fecha'].sort_values()
+        intervals = dates.diff().dt.days.dropna()
+        return intervals.mean() if len(intervals) > 0 else None
+    
+    cust_intervals = df.groupby('cliente_nombre').apply(calc_avg_interval).reset_index()
+    cust_intervals.columns = ['cliente', 'intervalo_promedio']
+    
+    # Get last purchase date
+    last_purchase = df.groupby('cliente_nombre')['fecha'].max().reset_index()
+    last_purchase.columns = ['cliente', 'ultima_compra']
+    
+    # Merge
+    cust_pred = cust_intervals.merge(last_purchase, on='cliente')
+    cust_pred = cust_pred.dropna()
+    
+    # Calculate expected next purchase
+    cust_pred['dias_desde_ultima'] = (today - cust_pred['ultima_compra']).dt.days
+    cust_pred['dias_hasta_proxima'] = cust_pred['intervalo_promedio'] - cust_pred['dias_desde_ultima']
+    cust_pred['fecha_esperada'] = cust_pred['ultima_compra'] + pd.to_timedelta(cust_pred['intervalo_promedio'], unit='D')
+    cust_pred['estado'] = cust_pred['dias_hasta_proxima'].apply(
+        lambda x: '🔴 Atrasado' if x < -7 else ('🟡 Próximo' if x < 7 else '🟢 A tiempo'))
+    
+    # Add total sales
+    cust_sales = df.groupby('cliente_nombre')['venta_neta'].sum().reset_index()
+    cust_sales.columns = ['cliente', 'total_ventas']
+    cust_pred = cust_pred.merge(cust_sales, on='cliente')
+    
+    # Filter to active customers
+    active = cust_pred[cust_pred['intervalo_promedio'] < 180]  # Customers who buy at least every 6 months
+    
+    # Metrics
+    overdue = active[active['estado'] == '🔴 Atrasado']
+    upcoming = active[active['estado'] == '🟡 Próximo']
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Clientes Analizados", len(active))
+    col2.metric("Atrasados", len(overdue))
+    col3.metric("Próximos (7 días)", len(upcoming))
+    col4.metric("Intervalo Promedio", f"{active['intervalo_promedio'].mean():.0f} días")
+    
+    st.markdown("---")
+    
+    # Status distribution
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📊 Estado de Compras")
+        status_counts = active['estado'].value_counts().reset_index()
+        status_counts.columns = ['Estado', 'Clientes']
+        fig = px.pie(status_counts, values='Clientes', names='Estado', template='plotly_dark',
+                     color_discrete_map={'🔴 Atrasado': '#ef553b', '🟡 Próximo': '#ffa500', '🟢 A tiempo': '#00cc96'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    with col_right:
+        st.subheader("📈 Distribución de Intervalos")
+        fig = px.histogram(active, x='intervalo_promedio', nbins=20, template='plotly_dark',
+                          labels={'intervalo_promedio': 'Días entre compras'})
+        st.plotly_chart(fig, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Overdue customers (prioritize by value)
+    st.subheader("🚨 Clientes Atrasados (Ordenados por Valor)")
+    if not overdue.empty:
+        overdue_display = overdue.nlargest(20, 'total_ventas')[['cliente', 'total_ventas', 'intervalo_promedio', 'dias_desde_ultima', 'dias_hasta_proxima']].copy()
+        overdue_display['total_ventas'] = overdue_display['total_ventas'].apply(lambda x: f"${x:,.0f}")
+        overdue_display['intervalo_promedio'] = overdue_display['intervalo_promedio'].apply(lambda x: f"{x:.0f} días")
+        overdue_display['dias_hasta_proxima'] = overdue_display['dias_hasta_proxima'].apply(lambda x: f"{abs(x):.0f} días atrasado")
+        overdue_display.columns = ['Cliente', 'Ventas Totales', 'Intervalo Normal', 'Días Desde Última', 'Atraso']
+        st.dataframe(overdue_display, hide_index=True, use_container_width=True)
+    else:
+        st.success("✅ No hay clientes atrasados")
+
+
 # --- MAIN ROUTING ---
 
 if selected_view == "📊 Visión General":
@@ -1654,8 +2136,22 @@ elif selected_view == "📢 Recordatorios":
     render_reminders()
 elif selected_view == "⚙️ Configuración":
     render_config()
-elif selected_view == "🔮 Predicciones ML":
+
+# ML sub-sections
+elif selected_view == "ML_📈 Ventas Futuras":
     render_ml_predictions()
+elif selected_view == "ML_📉 Riesgo de Churn":
+    render_churn_prediction()
+elif selected_view == "ML_🛒 Productos Asociados":
+    render_product_associations()
+elif selected_view == "ML_📦 Demanda por Producto":
+    render_product_demand()
+elif selected_view == "ML_💰 Valor del Cliente":
+    render_clv_prediction()
+elif selected_view == "ML_🗓️ Estacionalidad":
+    render_seasonality()
+elif selected_view == "ML_⏰ Próxima Compra":
+    render_next_purchase()
 
 # Clientes sub-sections
 elif selected_view == "Clientes_🔍 Buscador":
