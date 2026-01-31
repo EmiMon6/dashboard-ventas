@@ -268,6 +268,11 @@ elif selected_section == "📦 Productos":
     product_options = ["🏆 Top Productos", "📉 Sin Movimiento", "⏳ Análisis Recencia"]
     selected_sub = st.sidebar.radio("Sub-sección Productos:", product_options, label_visibility="collapsed")
     selected_view = f"Productos_{selected_sub}"
+    
+    # Product search box
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔎 Buscar Producto:**")
+    product_search = st.sidebar.text_input("Nombre del producto:", placeholder="Ej: Tela Popelina...", label_visibility="collapsed", key="product_search")
 
 elif selected_section == "📁 Categorías":
     st.sidebar.markdown("---")
@@ -282,6 +287,7 @@ elif selected_section == "🔮 Predicciones ML":
     selected_view = f"ML_{selected_sub}"
 else:
     client_search = ""  # Initialize for non-client sections
+    product_search = ""  # Initialize for non-product sections
 
 # Sidebar Filters (Global)
 st.sidebar.markdown("---")
@@ -1506,6 +1512,118 @@ def render_client_search(search_term):
     st.dataframe(products.head(20), hide_index=True, use_container_width=True)
 
 
+def render_product_search(search_term):
+    """Search and display product details based on search term."""
+    st.title("🔍 Buscador de Productos")
+    
+    if not search_term:
+        st.info("👆 Ingresa el nombre de un producto en la barra lateral para buscarlo.")
+        
+        # Show all products as a list
+        st.subheader("📋 Lista de Productos")
+        all_products = df.groupby('producto').agg({
+            'venta_neta': 'sum',
+            'cantidad': 'sum',
+            'cliente_nombre': 'nunique',
+            'fecha': 'max'
+        }).reset_index()
+        all_products.columns = ['Producto', 'Ventas Totales', 'Unidades', 'Clientes', 'Última Venta']
+        all_products = all_products.sort_values('Ventas Totales', ascending=False)
+        all_products['Ventas Totales'] = all_products['Ventas Totales'].apply(lambda x: f"${x:,.2f}")
+        all_products['Última Venta'] = all_products['Última Venta'].dt.strftime('%d/%m/%Y')
+        st.dataframe(all_products.head(50), hide_index=True, use_container_width=True)
+        return
+    
+    # Search for matching products
+    matching = df[df['producto'].str.lower().str.contains(search_term.lower(), na=False)]
+    unique_matches = matching['producto'].unique()
+    
+    if len(unique_matches) == 0:
+        st.warning(f"No se encontraron productos con '{search_term}'")
+        return
+    
+    st.success(f"Se encontraron {len(unique_matches)} producto(s)")
+    
+    # If multiple matches, let user select
+    if len(unique_matches) > 1:
+        selected_product = st.selectbox("Seleccionar producto:", unique_matches)
+    else:
+        selected_product = unique_matches[0]
+    
+    # Show product details
+    product_df = df[df['producto'] == selected_product]
+    today = df['fecha'].max()
+    
+    st.subheader(f"📦 {selected_product}")
+    
+    # Key metrics
+    total_sales = product_df['venta_neta'].sum()
+    total_units = product_df['cantidad'].sum()
+    unique_customers = product_df['cliente_nombre'].nunique()
+    last_sale = product_df['fecha'].max()
+    days_since_sale = (today - last_sale).days
+    avg_price = total_sales / total_units if total_units > 0 else 0
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        styled_metric("Ventas Totales", f"${total_sales:,.2f}", delta=None)
+    with col2:
+        styled_metric("Unidades Vendidas", f"{total_units:,.0f}", delta=None)
+    with col3:
+        styled_metric("Clientes que Compran", str(unique_customers), delta=None)
+    
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        styled_metric("Precio Promedio", f"${avg_price:,.2f}", delta=None)
+    with col5:
+        styled_metric("Última Venta", last_sale.strftime('%d/%m/%Y'), delta=None)
+    with col6:
+        styled_metric("Días Sin Vender", str(days_since_sale), 
+                     delta=-days_since_sale if days_since_sale < 30 else days_since_sale,
+                     delta_color="inverse" if days_since_sale > 0 else "normal")
+    
+    st.markdown("---")
+    
+    # Top customers for this product
+    st.subheader("🏆 Top Clientes que Compran este Producto")
+    customers = product_df.groupby('cliente_nombre').agg({
+        'cantidad': 'sum',
+        'venta_neta': 'sum',
+        'fecha': ['max', 'count']
+    }).reset_index()
+    customers.columns = ['Cliente', 'Unidades', 'Total Comprado', 'Última Compra', 'Transacciones']
+    customers = customers.sort_values('Total Comprado', ascending=False)
+    
+    # Chart
+    fig = px.bar(customers.head(15), x='Total Comprado', y='Cliente', orientation='h', 
+                 template='plotly_dark', color='Total Comprado',
+                 color_continuous_scale='Blues')
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'}, title='Top 15 Clientes por Valor')
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Table with all customers
+    customers_display = customers.copy()
+    customers_display['Total Comprado'] = customers_display['Total Comprado'].apply(lambda x: f"${x:,.2f}")
+    customers_display['Última Compra'] = customers_display['Última Compra'].dt.strftime('%d/%m/%Y')
+    st.dataframe(customers_display.head(30), hide_index=True, use_container_width=True)
+    export_dataframe(customers, f"clientes_producto_{selected_product[:20]}", "product_customers")
+    
+    st.markdown("---")
+    
+    # Sales trend for this product
+    st.subheader("📈 Tendencia de Ventas del Producto")
+    monthly_sales = product_df.groupby(product_df['fecha'].dt.to_period('M')).agg({
+        'venta_neta': 'sum',
+        'cantidad': 'sum'
+    }).reset_index()
+    monthly_sales['fecha'] = monthly_sales['fecha'].dt.to_timestamp()
+    
+    fig = px.line(monthly_sales, x='fecha', y='venta_neta', markers=True, 
+                  template='plotly_dark', title='Ventas Mensuales',
+                  labels={'fecha': 'Mes', 'venta_neta': 'Ventas ($)'})
+    st.plotly_chart(fig, use_container_width=True)
+
+
 def render_inactive_clients():
     """Show inactive clients that need attention."""
     st.title("⏰ Clientes Inactivos")
@@ -1941,158 +2059,85 @@ def render_churn_prediction():
 
 
 def render_product_associations():
-    """Find products that are frequently bought together using Apriori algorithm."""
+    """Find products that are frequently bought together."""
     st.title("🛒 Productos que se Compran Juntos")
-    st.caption("Análisis de reglas de asociación para cross-selling (algoritmo Apriori)")
-    
-    try:
-        from mlxtend.frequent_patterns import apriori, association_rules
-        from mlxtend.preprocessing import TransactionEncoder
-        use_apriori = True
-    except ImportError:
-        use_apriori = False
-        st.info("💡 Usando análisis básico de co-ocurrencia. Instala mlxtend para el algoritmo Apriori completo.")
+    st.caption("Análisis de asociación para cross-selling")
     
     # Group by invoice to find co-purchases
     invoice_products = df.groupby('factura_id')['producto'].apply(list).reset_index()
-    transactions = invoice_products['producto'].tolist()
     
-    if use_apriori:
-        # Use Apriori algorithm
-        te = TransactionEncoder()
-        te_array = te.fit_transform(transactions)
-        basket_df = pd.DataFrame(te_array, columns=te.columns_)
-        
-        # Find frequent itemsets - lower thresholds to find more associations
-        st.info("💡 **Tip:** Baja el soporte mínimo para ver más asociaciones (incluso las menos frecuentes)")
-        min_support = st.slider("Soporte mínimo:", 0.001, 0.1, 0.005, 0.001, 
-                                help="Fracción mínima de transacciones donde aparece el par. Valor más bajo = más asociaciones")
-        
-        frequent_items = apriori(basket_df, min_support=min_support, use_colnames=True)
-        
-        if len(frequent_items) < 2:
-            st.warning("No se encontraron suficientes itemsets frecuentes. Intenta reducir el soporte mínimo aún más.")
-            return
-        
-        # Generate association rules - lower lift threshold to include more
-        rules = association_rules(frequent_items, metric="lift", min_threshold=0.5, num_itemsets=len(frequent_items))
-        
-        if rules.empty:
-            st.warning("No se encontraron reglas de asociación significativas.")
-            return
-        
-        # Filter to pairs only
-        rules = rules[rules['antecedents'].apply(len) == 1]
-        rules = rules[rules['consequents'].apply(len) == 1]
-        rules['antecedent'] = rules['antecedents'].apply(lambda x: list(x)[0])
-        rules['consequent'] = rules['consequents'].apply(lambda x: list(x)[0])
-        rules = rules.sort_values('lift', ascending=False)
-        
-        # Metrics
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Reglas Encontradas", len(rules))
-        col2.metric("Mejor Lift", f"{rules['lift'].max():.2f}x")
-        col3.metric("Confianza Promedio", f"{rules['confidence'].mean():.0%}")
-        col4.metric("Soporte Promedio", f"{rules['support'].mean():.1%}")
-        
-        st.markdown("---")
-        
-        # Explanation
-        show_model_explanation(
-            "Algoritmo Apriori",
-            """
-            El algoritmo Apriori encuentra patrones frecuentes en transacciones:
-            
-            - **Soporte**: Fracción de transacciones que contienen el par (más alto = más común)
-            - **Confianza**: Probabilidad de comprar B dado que compró A (más alto = más predecible)
-            - **Lift**: Cuántas veces más probable es la compra conjunta vs. independiente
-              - Lift > 1 = asociación positiva (compran juntos más de lo esperado)
-              - Lift = 1 = independientes
-              - Lift < 1 = asociación negativa
-            """,
-            {"Reglas": len(rules), "Mejor Lift": f"{rules['lift'].max():.2f}x"},
-            "Usa estas reglas para sugerir productos complementarios en el checkout o en campañas de email."
-        )
-        
-        st.markdown("---")
-        
-        # Top rules table
-        st.subheader("🔗 Top Reglas de Asociación")
-        top_rules = rules.head(30)[['antecedent', 'consequent', 'support', 'confidence', 'lift']].copy()
-        top_rules['support'] = top_rules['support'].apply(lambda x: f"{x:.1%}")
-        top_rules['confidence'] = top_rules['confidence'].apply(lambda x: f"{x:.0%}")
-        top_rules['lift'] = top_rules['lift'].apply(lambda x: f"{x:.2f}x")
-        top_rules.columns = ['Si compra...', 'También compra...', 'Soporte', 'Confianza', 'Lift']
-        st.dataframe(top_rules, hide_index=True, use_container_width=True)
-        export_dataframe(top_rules, "reglas_asociacion", "assoc_rules")
-        
-    else:
-        # Fallback to basic co-occurrence
-        from collections import defaultdict
-        cooccurrence = defaultdict(int)
-        product_counts = defaultdict(int)
-        
-        for products in transactions:
-            unique_products = list(set(products))
-            for p in unique_products:
-                product_counts[p] += 1
-            for i, p1 in enumerate(unique_products):
-                for p2 in unique_products[i+1:]:
-                    pair = tuple(sorted([p1, p2]))
-                    cooccurrence[pair] += 1
-        
-        pairs_data = []
-        n_trans = len(transactions)
-        for (p1, p2), count in cooccurrence.items():
-            if count >= 3:
-                support = count / n_trans
-                conf_1 = count / product_counts[p1] if product_counts[p1] > 0 else 0
-                conf_2 = count / product_counts[p2] if product_counts[p2] > 0 else 0
-                # Calculate lift
-                expected = (product_counts[p1] / n_trans) * (product_counts[p2] / n_trans)
-                lift = support / expected if expected > 0 else 1
-                pairs_data.append({
-                    'producto_1': p1, 'producto_2': p2, 'veces_juntos': count,
-                    'soporte': support, 'confianza': max(conf_1, conf_2), 'lift': lift
-                })
-        
-        pairs_df = pd.DataFrame(pairs_data).sort_values('lift', ascending=False)
-        
-        if pairs_df.empty:
-            st.warning("No se encontraron asociaciones")
-            return
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Pares Encontrados", len(pairs_df))
-        col2.metric("Mejor Lift", f"{pairs_df['lift'].max():.2f}x")
-        col3.metric("Mejor Confianza", f"{pairs_df['confianza'].max():.0%}")
-        
-        st.markdown("---")
-        st.subheader("🔗 Top 20 Pares de Productos")
-        top_pairs = pairs_df.head(20).copy()
-        top_pairs['soporte'] = top_pairs['soporte'].apply(lambda x: f"{x:.1%}")
-        top_pairs['confianza'] = top_pairs['confianza'].apply(lambda x: f"{x:.0%}")
-        top_pairs['lift'] = top_pairs['lift'].apply(lambda x: f"{x:.2f}x")
-        top_pairs.columns = ['Producto 1', 'Producto 2', 'Veces Juntos', 'Soporte', 'Confianza', 'Lift']
-        st.dataframe(top_pairs, hide_index=True, use_container_width=True)
-        export_dataframe(top_pairs, "pares_productos", "prod_pairs")
+    # Count co-occurrences
+    from collections import defaultdict
+    cooccurrence = defaultdict(int)
+    product_counts = defaultdict(int)
+    
+    for products in invoice_products['producto']:
+        unique_products = list(set(products))
+        for p in unique_products:
+            product_counts[p] += 1
+        for i, p1 in enumerate(unique_products):
+            for p2 in unique_products[i+1:]:
+                pair = tuple(sorted([p1, p2]))
+                cooccurrence[pair] += 1
+    
+    # Convert to dataframe
+    pairs_data = []
+    for (p1, p2), count in cooccurrence.items():
+        if count >= 2:  # Minimum 2 co-occurrences
+            support = count / len(invoice_products)
+            confidence_1 = count / product_counts[p1] if product_counts[p1] > 0 else 0
+            confidence_2 = count / product_counts[p2] if product_counts[p2] > 0 else 0
+            pairs_data.append({
+                'producto_1': p1,
+                'producto_2': p2,
+                'veces_juntos': count,
+                'soporte': support,
+                'confianza': max(confidence_1, confidence_2)
+            })
+    
+    pairs_df = pd.DataFrame(pairs_data).sort_values('veces_juntos', ascending=False)
+    
+    if pairs_df.empty:
+        st.warning("No se encontraron suficientes asociaciones de productos")
+        return
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Pares Encontrados", len(pairs_df))
+    col2.metric("Par Más Frecuente", f"{pairs_df.iloc[0]['veces_juntos']} veces")
+    col3.metric("Mejor Confianza", f"{pairs_df['confianza'].max():.0%}")
+    
+    st.markdown("---")
+    
+    # Top pairs
+    st.subheader("🔗 Top 30 Pares de Productos")
+    top_pairs = pairs_df.head(30).copy()
+    top_pairs_export = top_pairs.copy()
+    top_pairs['soporte'] = top_pairs['soporte'].apply(lambda x: f"{x:.1%}")
+    top_pairs['confianza'] = top_pairs['confianza'].apply(lambda x: f"{x:.0%}")
+    top_pairs.columns = ['Producto 1', 'Producto 2', 'Veces Juntos', 'Soporte', 'Confianza']
+    st.dataframe(top_pairs, hide_index=True, use_container_width=True)
+    export_dataframe(top_pairs_export, "pares_productos", "prod_pairs")
     
     st.markdown("---")
     
     # Product selector for recommendations
-    st.subheader("🎯 Buscar Recomendaciones para un Producto")
+    st.subheader("🎯 Buscar Recomendaciones")
     all_products = sorted(df['producto'].unique())
     selected_product = st.selectbox("Selecciona un producto:", all_products, key="assoc_product")
     
-    if selected_product and use_apriori:
-        # Find best recommendations
-        recs = rules[rules['antecedent'] == selected_product].nlargest(10, 'lift')
-        if not recs.empty:
-            st.success(f"**Clientes que compran '{selected_product[:40]}...' también compran:**")
-            for _, row in recs.iterrows():
-                st.write(f"• **{row['consequent']}** (Lift: {row['lift']:.2f}x, Confianza: {row['confidence']:.0%})")
+    if selected_product:
+        # Find top associated products
+        associated = pairs_df[(pairs_df['producto_1'] == selected_product) | (pairs_df['producto_2'] == selected_product)].copy()
+        if not associated.empty:
+            associated['otro_producto'] = associated.apply(
+                lambda x: x['producto_2'] if x['producto_1'] == selected_product else x['producto_1'], axis=1)
+            associated = associated.nlargest(10, 'veces_juntos')
+            
+            st.success(f"**Clientes que compran '{selected_product[:30]}...' también compran:**")
+            for _, row in associated.iterrows():
+                st.write(f"• {row['otro_producto']} ({row['veces_juntos']} veces, {row['confianza']:.0%} confianza)")
         else:
-            st.info("No se encontraron recomendaciones para este producto")
+            st.info("No se encontraron asociaciones significativas para este producto")
 
 
 def render_product_demand():
@@ -2448,12 +2493,16 @@ elif selected_view == "Clientes_⏰ Inactivos":
     render_inactive_clients()
 
 # Productos sub-sections
-elif selected_view == "Productos_🏆 Top Productos":
-    render_top_products()
-elif selected_view == "Productos_📉 Sin Movimiento":
-    render_stale_products()
-elif selected_view == "Productos_⏳ Análisis Recencia":
-    render_recency_analysis()
+elif selected_view.startswith("Productos_"):
+    # Check if product search is active
+    if 'product_search' in dir() and product_search:
+        render_product_search(product_search)
+    elif selected_view == "Productos_🏆 Top Productos":
+        render_top_products()
+    elif selected_view == "Productos_📉 Sin Movimiento":
+        render_stale_products()
+    elif selected_view == "Productos_⏳ Análisis Recencia":
+        render_recency_analysis()
 
 # Categorías sub-sections
 elif selected_view == "Categorías_📊 Por Categoría":
