@@ -156,10 +156,40 @@ df = load_data(DATA_PATH)
 if df.empty:
     st.warning(f"No se encontraron datos en {DATA_PATH}. Por favor carga un archivo CSV en la sección de Configuración.")
 
-# Sidebar Navigation
-st.sidebar.title("Navegación")
-view_options = ["Visión General", "📢 Recordatorios", "🎯 Segmentación RFM", "Análisis por Categoría", "Categorías Agrupadas", "Análisis de Recencia", "Explorador de Clientes", "Datos Crudos", "⚙️ Configuración"]
-selected_view = st.sidebar.radio("Ir a la sección:", view_options)
+# Sidebar Navigation - Hierarchical Menu
+st.sidebar.title("📊 Dashboard de Ventas")
+
+# Main section selector
+main_sections = ["📊 Visión General", "📢 Recordatorios", "👥 Clientes", "📦 Productos", "📁 Categorías", "🔮 Predicciones ML", "⚙️ Configuración"]
+selected_section = st.sidebar.radio("Sección:", main_sections, label_visibility="collapsed")
+
+# Sub-section selectors based on main section
+selected_view = selected_section  # Default
+
+if selected_section == "👥 Clientes":
+    st.sidebar.markdown("---")
+    client_options = ["🔍 Buscador", "👤 Explorador", "🎯 Segmentación RFM", "⏰ Inactivos"]
+    selected_sub = st.sidebar.radio("Sub-sección Clientes:", client_options, label_visibility="collapsed")
+    selected_view = f"Clientes_{selected_sub}"
+    
+    # Client search box
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔎 Buscar Cliente:**")
+    client_search = st.sidebar.text_input("Nombre del cliente:", placeholder="Ej: Textiles...", label_visibility="collapsed")
+
+elif selected_section == "📦 Productos":
+    st.sidebar.markdown("---")
+    product_options = ["🏆 Top Productos", "📉 Sin Movimiento", "⏳ Análisis Recencia"]
+    selected_sub = st.sidebar.radio("Sub-sección Productos:", product_options, label_visibility="collapsed")
+    selected_view = f"Productos_{selected_sub}"
+
+elif selected_section == "📁 Categorías":
+    st.sidebar.markdown("---")
+    category_options = ["📊 Por Categoría", "📦 Agrupadas"]
+    selected_sub = st.sidebar.radio("Sub-sección Categorías:", category_options, label_visibility="collapsed")
+    selected_view = f"Categorías_{selected_sub}"
+else:
+    client_search = ""  # Initialize for non-client sections
 
 # Sidebar Filters (Global)
 st.sidebar.markdown("---")
@@ -1078,18 +1108,77 @@ def render_rfm_segmentation():
     rfm = calculate_rfm_scores(df)
     
     # Explanation
-    with st.expander("📖 ¿Qué significa cada segmento?"):
+    with st.expander("📖 ¿Qué significa cada segmento? (click para ver ejemplos)", expanded=False):
         st.markdown("""
-        | Segmento | Descripción | Acción Recomendada |
-        |----------|-------------|-------------------|
-        | 🏆 **VIP** | Mejores clientes, compran mucho y reciente | Retener, dar trato preferencial |
-        | 💎 **Leal** | Compran seguido, mantenerlos felices | Programas de fidelización |
-        | 🌟 **Potencial** | Recientes con alto gasto | Convertir en VIP |
-        | ⚠️ **En Riesgo** | Buenos pero dejaron de comprar | Recuperar urgentemente |
-        | 💤 **Dormidos** | Alto valor histórico pero inactivos | Campañas de reactivación |
-        | 👋 **Perdidos** | Ya casi no compran | Última oportunidad |
-        | 🆕 **Nuevos** | Clientes nuevos a fidelizar | Onboarding, bienvenida |
-        | 📊 **Regular** | Sin características distintivas | Monitorear |
+        ### 🏆 VIP - Los Mejores Clientes
+        **Cómo se ve:** Compró hace menos de 30 días, tiene más de 20 transacciones, y ha gastado más de $50,000 en total.
+        
+        **Ejemplo:** *"Textiles del Valle"* - Última compra hace 5 días, 45 transacciones, $120,000 en compras.
+        
+        **Acción:** Trato VIP, descuentos exclusivos, prioridad en entregas.
+        
+        ---
+        
+        ### 💎 Leal - Compradores Frecuentes
+        **Cómo se ve:** Compró recientemente y compra seguido, aunque el monto individual no es el más alto.
+        
+        **Ejemplo:** *"Confecciones María"* - Última compra hace 15 días, 30 transacciones, $25,000 total.
+        
+        **Acción:** Programas de fidelización, puntos, ofertas regulares.
+        
+        ---
+        
+        ### 🌟 Potencial - Alto Valor Reciente
+        **Cómo se ve:** Compró recientemente y gasta mucho, pero aún no es frecuente.
+        
+        **Ejemplo:** *"Industrias Textiles S.A."* - Última compra hace 10 días, solo 5 transacciones pero $80,000 total.
+        
+        **Acción:** Cultivar la relación, convertir en cliente frecuente.
+        
+        ---
+        
+        ### ⚠️ En Riesgo - ¡Recuperar Urgente!
+        **Cómo se ve:** Era un cliente excelente (frecuente + alto valor) pero dejó de comprar hace más de 90 días.
+        
+        **Ejemplo:** *"Modas Express"* - No compra hace 120 días, tenía 25 transacciones, $60,000 total histórico.
+        
+        **Acción:** Llamar personalmente, ofrecer incentivo especial, entender qué pasó.
+        
+        ---
+        
+        ### 💤 Dormidos - Alto Valor Inactivo
+        **Cómo se ve:** Gastó mucho históricamente pero no es tan frecuente, y no ha comprado en mucho tiempo.
+        
+        **Ejemplo:** *"Decoraciones Hogar"* - No compra hace 150 días, 8 transacciones, $45,000 total.
+        
+        **Acción:** Campañas de reactivación, recordatorios, ofertas de "te extrañamos".
+        
+        ---
+        
+        ### 👋 Perdidos - Casi Inactivos
+        **Cómo se ve:** No compran hace mucho tiempo, baja frecuencia, bajo valor.
+        
+        **Ejemplo:** *"Tienda La Esquina"* - No compra hace 200 días, solo 2 transacciones, $500 total.
+        
+        **Acción:** Último intento de recuperación o descartar del seguimiento activo.
+        
+        ---
+        
+        ### 🆕 Nuevos - Clientes Frescos
+        **Cómo se ve:** Compraron recientemente pero tienen pocas transacciones (cliente nuevo).
+        
+        **Ejemplo:** *"Boutique Nueva"* - Primera compra hace 7 días, 1 transacción, $3,000.
+        
+        **Acción:** Onboarding, bienvenida, construir relación desde inicio.
+        
+        ---
+        
+        ### 📊 Regular - Seguimiento Normal
+        **Cómo se ve:** No destaca en ninguna métrica particular, cliente promedio.
+        
+        **Ejemplo:** *"Almacén Centro"* - Última compra hace 45 días, 8 transacciones, $12,000 total.
+        
+        **Acción:** Mantener comunicación regular, monitorear cambios.
         """)
     
     st.markdown("---")
@@ -1258,23 +1347,336 @@ def render_raw_data():
     st.dataframe(filtered_df.sort_values(by='fecha', ascending=False))
 
 
+def render_client_search(search_term):
+    """Search and display client details based on search term."""
+    st.title("🔍 Buscador de Clientes")
+    
+    if not search_term:
+        st.info("👆 Ingresa el nombre de un cliente en la barra lateral para buscarlo.")
+        
+        # Show all clients as a list
+        st.subheader("📋 Lista de Clientes")
+        all_clients = df.groupby('cliente_nombre').agg({
+            'venta_neta': 'sum',
+            'fecha': ['max', 'count']
+        }).reset_index()
+        all_clients.columns = ['Cliente', 'Ventas Totales', 'Última Compra', 'Transacciones']
+        all_clients = all_clients.sort_values('Ventas Totales', ascending=False)
+        all_clients['Ventas Totales'] = all_clients['Ventas Totales'].apply(lambda x: f"${x:,.2f}")
+        all_clients['Última Compra'] = all_clients['Última Compra'].dt.strftime('%d/%m/%Y')
+        st.dataframe(all_clients.head(50), hide_index=True, use_container_width=True)
+        return
+    
+    # Search for matching clients
+    matching = df[df['cliente_nombre'].str.lower().str.contains(search_term.lower(), na=False)]
+    unique_matches = matching['cliente_nombre'].unique()
+    
+    if len(unique_matches) == 0:
+        st.warning(f"No se encontraron clientes con '{search_term}'")
+        return
+    
+    st.success(f"Se encontraron {len(unique_matches)} cliente(s)")
+    
+    # If multiple matches, let user select
+    if len(unique_matches) > 1:
+        selected_client = st.selectbox("Seleccionar cliente:", unique_matches)
+    else:
+        selected_client = unique_matches[0]
+    
+    # Show client details
+    client_df = df[df['cliente_nombre'] == selected_client]
+    today = df['fecha'].max()
+    
+    st.subheader(f"📊 {selected_client}")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Comprado", f"${client_df['venta_neta'].sum():,.2f}")
+    col2.metric("Transacciones", len(client_df['factura_id'].unique()))
+    col3.metric("Última Compra", client_df['fecha'].max().strftime('%d/%m/%Y'))
+    days_inactive = (today - client_df['fecha'].max()).days
+    col4.metric("Días Sin Comprar", days_inactive, delta=f"{-days_inactive}" if days_inactive < 30 else None)
+    
+    st.markdown("---")
+    
+    # Products bought
+    st.subheader("📦 Productos Comprados")
+    products = client_df.groupby('producto').agg({
+        'cantidad': 'sum',
+        'venta_neta': 'sum',
+        'fecha': 'max'
+    }).reset_index().sort_values('venta_neta', ascending=False)
+    products.columns = ['Producto', 'Cantidad', 'Valor', 'Última Compra']
+    
+    fig = px.bar(products.head(15), x='Valor', y='Producto', orientation='h', template='plotly_dark', color='Valor')
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'})
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.dataframe(products.head(20), hide_index=True, use_container_width=True)
+
+
+def render_inactive_clients():
+    """Show inactive clients that need attention."""
+    st.title("⏰ Clientes Inactivos")
+    st.caption("Clientes importantes que no han comprado en más de 90 días")
+    
+    today = df['fecha'].max()
+    
+    cust_stats = df.groupby('cliente_nombre').agg({
+        'venta_neta': 'sum',
+        'fecha': ['max', 'count']
+    }).reset_index()
+    cust_stats.columns = ['cliente', 'total_ventas', 'ultima_compra', 'transacciones']
+    cust_stats['dias_sin_compra'] = (today - cust_stats['ultima_compra']).dt.days
+    
+    # Filter important inactive
+    important = cust_stats[(cust_stats['transacciones'] > 3) | (cust_stats['total_ventas'] > 5000)]
+    inactive = important[important['dias_sin_compra'] > 90].sort_values('total_ventas', ascending=False)
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Clientes Inactivos", len(inactive))
+    col2.metric("Valor en Riesgo", f"${inactive['total_ventas'].sum():,.0f}")
+    col3.metric("Días Promedio", f"{inactive['dias_sin_compra'].mean():.0f}")
+    
+    st.markdown("---")
+    
+    if not inactive.empty:
+        fig = px.scatter(inactive, x='dias_sin_compra', y='total_ventas', 
+                        hover_name='cliente', size='transacciones',
+                        title='Clientes Inactivos: Días vs Valor',
+                        template='plotly_dark', color='dias_sin_compra',
+                        color_continuous_scale='Reds')
+        st.plotly_chart(fig, use_container_width=True)
+        
+        inactive_display = inactive.copy()
+        inactive_display['ultima_compra'] = inactive_display['ultima_compra'].dt.strftime('%d/%m/%Y')
+        inactive_display['total_ventas'] = inactive_display['total_ventas'].apply(lambda x: f"${x:,.2f}")
+        inactive_display.columns = ['Cliente', 'Ventas Totales', 'Última Compra', 'Transacciones', 'Días Inactivo']
+        st.dataframe(inactive_display, hide_index=True, use_container_width=True)
+    else:
+        st.success("✅ No hay clientes importantes inactivos")
+
+
+def render_top_products():
+    """Show top performing products."""
+    st.title("🏆 Top Productos")
+    
+    prod_stats = filtered_df.groupby('producto').agg({
+        'venta_neta': 'sum',
+        'cantidad': 'sum',
+        'cliente_nombre': 'nunique',
+        'fecha': ['max', 'count']
+    }).reset_index()
+    prod_stats.columns = ['Producto', 'Ventas', 'Cantidad', 'Clientes', 'Última Venta', 'Transacciones']
+    prod_stats = prod_stats.sort_values('Ventas', ascending=False)
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Productos", len(prod_stats))
+    col2.metric("Top Producto", prod_stats.iloc[0]['Producto'][:20] + "...")
+    col3.metric("Ventas #1", f"${prod_stats.iloc[0]['Ventas']:,.0f}")
+    
+    st.markdown("---")
+    
+    top_20 = prod_stats.head(20)
+    fig = px.bar(top_20, x='Ventas', y='Producto', orientation='h',
+                 template='plotly_dark', color='Ventas', color_continuous_scale='Blues')
+    fig.update_layout(yaxis={'categoryorder': 'total ascending'})
+    st.plotly_chart(fig, use_container_width=True)
+    
+    st.dataframe(prod_stats.head(30), hide_index=True, use_container_width=True)
+
+
+def render_stale_products():
+    """Show products without recent sales."""
+    st.title("📉 Productos Sin Movimiento")
+    st.caption("Productos importantes que no se han vendido en más de 60 días")
+    
+    today = df['fecha'].max()
+    
+    prod_stats = df.groupby('producto').agg({
+        'venta_neta': 'sum',
+        'fecha': ['max', 'count']
+    }).reset_index()
+    prod_stats.columns = ['producto', 'total_ventas', 'ultima_venta', 'transacciones']
+    prod_stats['dias_sin_venta'] = (today - prod_stats['ultima_venta']).dt.days
+    
+    # Top 50 products by sales that are stale
+    top_products = prod_stats.nlargest(50, 'total_ventas')
+    stale = top_products[top_products['dias_sin_venta'] > 60].sort_values('total_ventas', ascending=False)
+    
+    col1, col2 = st.columns(2)
+    col1.metric("Productos Afectados", len(stale))
+    col2.metric("Ventas Históricas", f"${stale['total_ventas'].sum():,.0f}")
+    
+    st.markdown("---")
+    
+    if not stale.empty:
+        fig = px.bar(stale.head(15), x='total_ventas', y='producto', orientation='h',
+                     template='plotly_dark', color='dias_sin_venta', 
+                     color_continuous_scale='Reds',
+                     title='Productos Top Sin Ventas Recientes')
+        fig.update_layout(yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig, use_container_width=True)
+        
+        stale_display = stale.copy()
+        stale_display['ultima_venta'] = stale_display['ultima_venta'].dt.strftime('%d/%m/%Y')
+        stale_display['total_ventas'] = stale_display['total_ventas'].apply(lambda x: f"${x:,.2f}")
+        st.dataframe(stale_display, hide_index=True, use_container_width=True)
+    else:
+        st.success("✅ Todos los productos top tienen ventas recientes")
+
+
+def render_ml_predictions():
+    """ML-based sales predictions using linear regression."""
+    st.title("🔮 Predicciones ML")
+    st.caption("Predicción de ventas usando regresión lineal sobre tendencia histórica")
+    
+    try:
+        from sklearn.linear_model import LinearRegression
+        import numpy as np
+    except ImportError:
+        st.error("⚠️ scikit-learn no está instalado. Ejecuta: pip install scikit-learn")
+        return
+    
+    # Prepare monthly data
+    monthly = df.groupby(df['fecha'].dt.to_period('M')).agg({
+        'venta_neta': 'sum'
+    }).reset_index()
+    monthly['fecha'] = monthly['fecha'].astype(str)
+    monthly['month_num'] = range(1, len(monthly) + 1)
+    
+    if len(monthly) < 3:
+        st.warning("Se necesitan al menos 3 meses de datos para hacer predicciones")
+        return
+    
+    # Train model
+    X = monthly['month_num'].values.reshape(-1, 1)
+    y = monthly['venta_neta'].values
+    
+    model = LinearRegression()
+    model.fit(X, y)
+    
+    # Predictions
+    next_month_num = len(monthly) + 1
+    next_2_months = len(monthly) + 2
+    next_3_months = len(monthly) + 3
+    
+    pred_1 = model.predict([[next_month_num]])[0]
+    pred_2 = model.predict([[next_2_months]])[0]
+    pred_3 = model.predict([[next_3_months]])[0]
+    
+    current_month_sales = monthly.iloc[-1]['venta_neta']
+    change_pct = ((pred_1 - current_month_sales) / current_month_sales) * 100
+    
+    # R² score
+    r2 = model.score(X, y)
+    
+    # Display metrics
+    st.subheader("📊 Métricas del Modelo")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Confianza (R²)", f"{r2:.2%}")
+    col2.metric("Tendencia", "📈 Subiendo" if model.coef_[0] > 0 else "📉 Bajando")
+    col3.metric("Mes Actual", f"${current_month_sales:,.0f}")
+    col4.metric("Predicción Próximo Mes", f"${pred_1:,.0f}", delta=f"{change_pct:+.1f}%")
+    
+    st.markdown("---")
+    
+    # Prediction table
+    st.subheader("🗓️ Proyecciones")
+    pred_df = pd.DataFrame({
+        'Mes': ['Próximo Mes', 'En 2 Meses', 'En 3 Meses'],
+        'Predicción': [f"${pred_1:,.0f}", f"${pred_2:,.0f}", f"${pred_3:,.0f}"],
+        'vs Actual': [f"{change_pct:+.1f}%", 
+                     f"{((pred_2 - current_month_sales) / current_month_sales) * 100:+.1f}%",
+                     f"{((pred_3 - current_month_sales) / current_month_sales) * 100:+.1f}%"]
+    })
+    st.dataframe(pred_df, hide_index=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Chart with trend line and predictions
+    st.subheader("📈 Tendencia y Proyección")
+    
+    # Add predictions to chart data
+    future_months = pd.DataFrame({
+        'fecha': [f'Pred {i}' for i in range(1, 4)],
+        'month_num': [next_month_num, next_2_months, next_3_months],
+        'venta_neta': [pred_1, pred_2, pred_3],
+        'tipo': ['Predicción', 'Predicción', 'Predicción']
+    })
+    
+    chart_data = monthly.copy()
+    chart_data['tipo'] = 'Real'
+    chart_data = pd.concat([chart_data, future_months], ignore_index=True)
+    
+    # Create trend line
+    all_x = chart_data['month_num'].values.reshape(-1, 1)
+    trend_line = model.predict(all_x)
+    chart_data['tendencia'] = trend_line
+    
+    fig = px.line(chart_data, x='fecha', y='venta_neta', 
+                  color='tipo', markers=True,
+                  title='Ventas Mensuales + Proyección',
+                  template='plotly_dark',
+                  color_discrete_map={'Real': '#00d4aa', 'Predicción': '#ff6b6b'})
+    
+    # Add trend line
+    fig.add_scatter(x=chart_data['fecha'], y=chart_data['tendencia'], 
+                    mode='lines', name='Tendencia', line=dict(dash='dash', color='yellow'))
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Model explanation
+    with st.expander("ℹ️ ¿Cómo funciona la predicción?"):
+        st.markdown(f"""
+        **Modelo:** Regresión Lineal Simple
+        
+        **Datos utilizados:** {len(monthly)} meses de ventas históricas
+        
+        **Coeficiente (pendiente):** ${model.coef_[0]:,.2f} por mes
+        - Esto significa que en promedio las ventas {"aumentan" if model.coef_[0] > 0 else "disminuyen"} ${abs(model.coef_[0]):,.2f} cada mes
+        
+        **Confianza (R²):** {r2:.2%}
+        - Valores más altos = modelo más confiable
+        - >70% = bueno, >80% = muy bueno
+        
+        **Limitaciones:**
+        - Asume tendencia lineal constante
+        - No considera estacionalidad
+        - Mejor para corto plazo (1-3 meses)
+        """)
+
+
 # --- MAIN ROUTING ---
 
-if selected_view == "Visión General":
+if selected_view == "📊 Visión General":
     render_overview()
 elif selected_view == "📢 Recordatorios":
     render_reminders()
-elif selected_view == "🎯 Segmentación RFM":
-    render_rfm_segmentation()
-elif selected_view == "Análisis por Categoría":
-    render_category_analysis()
-elif selected_view == "Categorías Agrupadas":
-    render_grouped_category_analysis()
-elif selected_view == "Análisis de Recencia":
-    render_recency_analysis()
-elif selected_view == "Explorador de Clientes":
-    render_customer_deep_dive()
-elif selected_view == "Datos Crudos":
-    render_raw_data()
 elif selected_view == "⚙️ Configuración":
     render_config()
+elif selected_view == "🔮 Predicciones ML":
+    render_ml_predictions()
+
+# Clientes sub-sections
+elif selected_view == "Clientes_🔍 Buscador":
+    render_client_search(client_search)
+elif selected_view == "Clientes_👤 Explorador":
+    render_customer_deep_dive()
+elif selected_view == "Clientes_🎯 Segmentación RFM":
+    render_rfm_segmentation()
+elif selected_view == "Clientes_⏰ Inactivos":
+    render_inactive_clients()
+
+# Productos sub-sections
+elif selected_view == "Productos_🏆 Top Productos":
+    render_top_products()
+elif selected_view == "Productos_📉 Sin Movimiento":
+    render_stale_products()
+elif selected_view == "Productos_⏳ Análisis Recencia":
+    render_recency_analysis()
+
+# Categorías sub-sections
+elif selected_view == "Categorías_📊 Por Categoría":
+    render_category_analysis()
+elif selected_view == "Categorías_📦 Agrupadas":
+    render_grouped_category_analysis()
