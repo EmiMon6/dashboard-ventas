@@ -1655,7 +1655,7 @@ def render_ml_predictions():
             yearly_seasonality=True,
             weekly_seasonality=False,
             daily_seasonality=False,
-            interval_width=0.95  # 95% confidence interval
+            interval_width=0.80  # 80% confidence interval (narrower bands)
         )
         model.fit(prophet_df)
         
@@ -1699,7 +1699,7 @@ def render_ml_predictions():
         st.markdown("---")
         
         # Prediction table with confidence intervals
-        st.subheader("🗓️ Proyecciones con Intervalos de Confianza (95%)")
+        st.subheader("🗓️ Proyecciones con Intervalos de Confianza (80%)")
         pred_df = pd.DataFrame({
             'Mes': ['Próximo Mes', 'En 2 Meses', 'En 3 Meses'],
             'Predicción': [f"${pred_1:,.0f}", f"${pred_2:,.0f}", f"${pred_3:,.0f}"],
