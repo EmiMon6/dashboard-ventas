@@ -1917,15 +1917,27 @@ def render_churn_prediction():
     
     st.markdown("---")
     
-    # High risk customers table
-    st.subheader("🚨 Clientes en Alto Riesgo")
-    high_risk_display = high_risk.nlargest(30, 'total_ventas')[['cliente', 'total_ventas', 'transacciones', 'dias_sin_compra', 'prob_churn']].copy()
-    high_risk_raw = high_risk_display.copy()  # For export
-    high_risk_display['total_ventas'] = high_risk_display['total_ventas'].apply(lambda x: f"${x:,.0f}")
-    high_risk_display['prob_churn'] = high_risk_display['prob_churn'].apply(lambda x: f"{x:.0%}")
-    high_risk_display.columns = ['Cliente', 'Ventas Totales', 'Transacciones', 'Días Inactivo', 'Prob. Churn']
-    st.dataframe(high_risk_display, hide_index=True, use_container_width=True)
-    export_dataframe(high_risk_raw, "clientes_alto_riesgo", "churn_export")
+    # Risk level filter
+    st.subheader("🔍 Filtrar Clientes por Nivel de Riesgo")
+    risk_filter = st.selectbox(
+        "Mostrar clientes con riesgo:",
+        ["🔴 Alto", "🟡 Medio", "🟢 Bajo", "Todos"],
+        key="churn_risk_filter"
+    )
+    
+    if risk_filter == "Todos":
+        filtered_customers = cust_stats.copy()
+    else:
+        filtered_customers = cust_stats[cust_stats['riesgo'] == risk_filter].copy()
+    
+    st.subheader(f"📋 Clientes ({risk_filter}) - {len(filtered_customers)} encontrados")
+    display_df = filtered_customers.nlargest(50, 'total_ventas')[['cliente', 'total_ventas', 'transacciones', 'dias_sin_compra', 'prob_churn', 'riesgo']].copy()
+    export_df = display_df.copy()
+    display_df['total_ventas'] = display_df['total_ventas'].apply(lambda x: f"${x:,.0f}")
+    display_df['prob_churn'] = display_df['prob_churn'].apply(lambda x: f"{x:.0%}")
+    display_df.columns = ['Cliente', 'Ventas Totales', 'Transacciones', 'Días Inactivo', 'Prob. Churn', 'Nivel Riesgo']
+    st.dataframe(display_df, hide_index=True, use_container_width=True)
+    export_dataframe(export_df, f"clientes_riesgo_{risk_filter.replace(' ', '_')}", "churn_export")
 
 
 def render_product_associations():
@@ -2218,14 +2230,28 @@ def render_clv_prediction():
     
     st.markdown("---")
     
-    # Top customers by CLV
-    st.subheader("🌟 Top 20 Clientes por CLV")
-    top_clv = cust_stats.nlargest(20, 'clv_estimado')[['cliente', 'total_ventas', 'transacciones', 'frecuencia_mensual', 'clv_estimado', 'segmento_valor']].copy()
-    top_clv['total_ventas'] = top_clv['total_ventas'].apply(lambda x: f"${x:,.0f}")
-    top_clv['clv_estimado'] = top_clv['clv_estimado'].apply(lambda x: f"${x:,.0f}")
-    top_clv['frecuencia_mensual'] = top_clv['frecuencia_mensual'].apply(lambda x: f"{x:.1f}")
-    top_clv.columns = ['Cliente', 'Ventas Históricas', 'Transacciones', 'Freq/Mes', 'CLV Estimado', 'Segmento']
-    st.dataframe(top_clv, hide_index=True, use_container_width=True)
+    # Segment filter
+    st.subheader("🔍 Filtrar Clientes por Nivel de Valor")
+    segment_filter = st.selectbox(
+        "Mostrar clientes del segmento:",
+        ["💎 Platino", "🥇 Oro", "🥈 Plata", "🥉 Bronce", "Todos"],
+        key="clv_segment_filter"
+    )
+    
+    if segment_filter == "Todos":
+        filtered_clv = cust_stats.copy()
+    else:
+        filtered_clv = cust_stats[cust_stats['segmento_valor'] == segment_filter].copy()
+    
+    st.subheader(f"📋 Clientes ({segment_filter}) - {len(filtered_clv)} encontrados")
+    display_clv = filtered_clv.nlargest(50, 'clv_estimado')[['cliente', 'total_ventas', 'transacciones', 'frecuencia_mensual', 'clv_estimado', 'segmento_valor', 'dias_sin_compra']].copy()
+    export_clv = display_clv.copy()
+    display_clv['total_ventas'] = display_clv['total_ventas'].apply(lambda x: f"${x:,.0f}")
+    display_clv['clv_estimado'] = display_clv['clv_estimado'].apply(lambda x: f"${x:,.0f}")
+    display_clv['frecuencia_mensual'] = display_clv['frecuencia_mensual'].apply(lambda x: f"{x:.1f}")
+    display_clv.columns = ['Cliente', 'Ventas Históricas', 'Trans.', 'Freq/Mes', 'CLV Estimado', 'Nivel', 'Días Inactivo']
+    st.dataframe(display_clv, hide_index=True, use_container_width=True)
+    export_dataframe(export_clv, f"clientes_clv_{segment_filter.replace(' ', '_')}", "clv_export")
 
 
 def render_seasonality():
@@ -2336,8 +2362,11 @@ def render_next_purchase():
     cust_sales.columns = ['cliente', 'total_ventas']
     cust_pred = cust_pred.merge(cust_sales, on='cliente')
     
-    # Filter to active customers
-    active = cust_pred[cust_pred['intervalo_promedio'] < 180]  # Customers who buy at least every 6 months
+    # Filter to active customers (max 180 days since last purchase, interval < 180 days)
+    active = cust_pred[
+        (cust_pred['intervalo_promedio'] < 180) & 
+        (cust_pred['dias_desde_ultima'] <= 180)
+    ].copy()
     
     # Metrics
     overdue = active[active['estado'] == '🔴 Atrasado']
