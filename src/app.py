@@ -1830,8 +1830,20 @@ def render_churn_prediction():
     model = RandomForestClassifier(n_estimators=50, random_state=42, max_depth=5)
     model.fit(X_scaled, y)
     
+    # Calculate AUC if we have both classes
+    from sklearn.metrics import roc_auc_score, accuracy_score
+    y_pred = model.predict(X_scaled)
+    y_proba = model.predict_proba(X_scaled)[:, 1]
+    
+    if len(np.unique(y)) > 1:
+        auc_score = roc_auc_score(y, y_proba)
+    else:
+        auc_score = None
+    
+    accuracy = accuracy_score(y, y_pred)
+    
     # Predict probability
-    cust_stats['prob_churn'] = model.predict_proba(X_scaled)[:, 1]
+    cust_stats['prob_churn'] = y_proba
     cust_stats['riesgo'] = pd.cut(cust_stats['prob_churn'], 
                                    bins=[0, 0.3, 0.6, 1.0], 
                                    labels=['🟢 Bajo', '🟡 Medio', '🔴 Alto'])
@@ -1839,11 +1851,33 @@ def render_churn_prediction():
     # Display metrics
     high_risk = cust_stats[cust_stats['prob_churn'] > 0.6]
     
+    st.markdown("### 📊 Métricas del Modelo")
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Clientes", len(cust_stats))
-    col2.metric("Alto Riesgo", len(high_risk))
-    col3.metric("Valor en Riesgo", f"${high_risk['total_ventas'].sum():,.0f}")
-    col4.metric("% en Riesgo", f"{len(high_risk)/len(cust_stats)*100:.1f}%")
+    with col1:
+        if auc_score:
+            styled_metric("AUC Score", f"{auc_score:.2f}", delta=(auc_score - 0.5) * 100 if auc_score > 0.5 else 0)
+        else:
+            st.metric("AUC Score", "N/A")
+    with col2:
+        styled_metric("Accuracy", f"{accuracy:.0%}", delta=None)
+    with col3:
+        styled_metric("Alto Riesgo", str(len(high_risk)), delta=len(high_risk)/len(cust_stats)*100, delta_color="inverse")
+    with col4:
+        styled_metric("Valor en Riesgo", f"${high_risk['total_ventas'].sum():,.0f}", delta=None)
+    
+    st.markdown("---")
+    
+    # Feature importance
+    st.subheader("🔍 Importancia de Variables")
+    importance_df = pd.DataFrame({
+        'Variable': ['Ventas Totales', 'Venta Promedio', 'Transacciones', 'Productos Únicos', 'Frecuencia'],
+        'Importancia': model.feature_importances_
+    }).sort_values('Importancia', ascending=True)
+    
+    fig = px.bar(importance_df, x='Importancia', y='Variable', orientation='h',
+                 template='plotly_dark', color='Importancia', color_continuous_scale='RdYlGn_r')
+    fig.update_layout(title='¿Qué factores predicen el abandono?')
+    st.plotly_chart(fig, use_container_width=True)
     
     st.markdown("---")
     
@@ -1868,13 +1902,30 @@ def render_churn_prediction():
     
     st.markdown("---")
     
+    # Model explanation
+    show_model_explanation(
+        "Random Forest Classifier",
+        """
+        Random Forest es un modelo de clasificación que combina múltiples árboles de decisión:
+        - Cada árbol vota sobre si un cliente va a abandonar
+        - La probabilidad final es el promedio de todos los votos
+        - Es robusto al ruido y no requiere escalado de variables
+        """,
+        {"AUC": f"{auc_score:.2f}" if auc_score else "N/A", "Accuracy": f"{accuracy:.0%}"},
+        "Un AUC > 0.7 indica buen poder predictivo. La gráfica de importancia muestra qué variables más influyen en detectar abandono."
+    )
+    
+    st.markdown("---")
+    
     # High risk customers table
     st.subheader("🚨 Clientes en Alto Riesgo")
-    high_risk_display = high_risk.nlargest(20, 'total_ventas')[['cliente', 'total_ventas', 'transacciones', 'dias_sin_compra', 'prob_churn']].copy()
+    high_risk_display = high_risk.nlargest(30, 'total_ventas')[['cliente', 'total_ventas', 'transacciones', 'dias_sin_compra', 'prob_churn']].copy()
+    high_risk_raw = high_risk_display.copy()  # For export
     high_risk_display['total_ventas'] = high_risk_display['total_ventas'].apply(lambda x: f"${x:,.0f}")
     high_risk_display['prob_churn'] = high_risk_display['prob_churn'].apply(lambda x: f"{x:.0%}")
     high_risk_display.columns = ['Cliente', 'Ventas Totales', 'Transacciones', 'Días Inactivo', 'Prob. Churn']
     st.dataframe(high_risk_display, hide_index=True, use_container_width=True)
+    export_dataframe(high_risk_raw, "clientes_alto_riesgo", "churn_export")
 
 
 def render_product_associations():
