@@ -3,6 +3,92 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from data_loader import load_data, get_kpis, normalize_products
+import io
+
+# --- HELPER FUNCTIONS FOR UI ENHANCEMENTS ---
+
+def styled_metric(label, value, delta=None, delta_color="normal"):
+    """Display a metric with colored delta and arrow."""
+    if delta is not None:
+        if delta > 0:
+            arrow = "↑"
+            color = "#00cc96"  # Green
+            delta_text = f"+{delta:.1f}%"
+        elif delta < 0:
+            arrow = "↓"
+            color = "#ef553b"  # Red
+            delta_text = f"{delta:.1f}%"
+        else:
+            arrow = "→"
+            color = "#ffa500"  # Orange
+            delta_text = "0%"
+        
+        if delta_color == "inverse":  # For metrics where lower is better
+            color = "#ef553b" if delta > 0 else "#00cc96"
+        
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%); 
+                    padding: 1rem; border-radius: 10px; border-left: 4px solid {color};">
+            <p style="margin: 0; color: #888; font-size: 0.85rem;">{label}</p>
+            <p style="margin: 0; font-size: 1.5rem; font-weight: bold; color: white;">{value}</p>
+            <p style="margin: 0; color: {color}; font-size: 0.9rem;">{arrow} {delta_text}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.metric(label, value)
+
+
+def export_dataframe(df, filename, key):
+    """Add export buttons for CSV and Excel."""
+    col1, col2 = st.columns([1, 1])
+    
+    # CSV export
+    csv = df.to_csv(index=False).encode('utf-8')
+    col1.download_button(
+        label="📥 Exportar CSV",
+        data=csv,
+        file_name=f"{filename}.csv",
+        mime="text/csv",
+        key=f"csv_{key}"
+    )
+    
+    # Excel export
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Datos')
+    excel_data = buffer.getvalue()
+    col2.download_button(
+        label="📥 Exportar Excel",
+        data=excel_data,
+        file_name=f"{filename}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"excel_{key}"
+    )
+
+
+def show_model_explanation(model_name, description, metrics_dict, tips=None):
+    """Display model explanation with metrics."""
+    with st.expander(f"ℹ️ Cómo funciona: {model_name}", expanded=False):
+        st.markdown(f"**{model_name}**")
+        st.markdown(description)
+        
+        if metrics_dict:
+            st.markdown("**Métricas del modelo:**")
+            cols = st.columns(len(metrics_dict))
+            for i, (metric_name, metric_value) in enumerate(metrics_dict.items()):
+                cols[i].metric(metric_name, metric_value)
+        
+        if tips:
+            st.info(f"💡 **Tip:** {tips}")
+
+
+def show_confidence_interval(prediction, std_dev, confidence=0.95):
+    """Calculate and display confidence interval."""
+    import scipy.stats as stats
+    z = stats.norm.ppf((1 + confidence) / 2)
+    lower = prediction - z * std_dev
+    upper = prediction + z * std_dev
+    return lower, upper
 
 # Page Configuration
 st.set_page_config(
@@ -1532,124 +1618,167 @@ def render_stale_products():
 
 
 def render_ml_predictions():
-    """ML-based sales predictions using linear regression."""
-    st.title("🔮 Predicciones ML")
-    st.caption("Predicción de ventas usando regresión lineal sobre tendencia histórica")
+    """ML-based sales predictions using Prophet for better seasonality handling."""
+    st.title("🔮 Predicción de Ventas con Prophet")
+    st.caption("Modelo avanzado que captura tendencia y estacionalidad automáticamente")
     
-    try:
-        from sklearn.linear_model import LinearRegression
-        import numpy as np
-    except ImportError:
-        st.error("⚠️ scikit-learn no está instalado. Ejecuta: pip install scikit-learn")
-        return
+    # Model selection
+    model_type = st.radio("Seleccionar modelo:", ["🚀 Prophet (Recomendado)", "📈 Regresión Lineal (Simple)"], horizontal=True)
     
     # Prepare monthly data
     monthly = df.groupby(df['fecha'].dt.to_period('M')).agg({
         'venta_neta': 'sum'
     }).reset_index()
-    monthly['fecha'] = monthly['fecha'].astype(str)
-    monthly['month_num'] = range(1, len(monthly) + 1)
+    monthly['fecha'] = monthly['fecha'].dt.to_timestamp()
     
     if len(monthly) < 3:
         st.warning("Se necesitan al menos 3 meses de datos para hacer predicciones")
         return
     
-    # Train model
-    X = monthly['month_num'].values.reshape(-1, 1)
-    y = monthly['venta_neta'].values
-    
-    model = LinearRegression()
-    model.fit(X, y)
-    
-    # Predictions
-    next_month_num = len(monthly) + 1
-    next_2_months = len(monthly) + 2
-    next_3_months = len(monthly) + 3
-    
-    pred_1 = model.predict([[next_month_num]])[0]
-    pred_2 = model.predict([[next_2_months]])[0]
-    pred_3 = model.predict([[next_3_months]])[0]
-    
     current_month_sales = monthly.iloc[-1]['venta_neta']
-    change_pct = ((pred_1 - current_month_sales) / current_month_sales) * 100
     
-    # R² score
-    r2 = model.score(X, y)
+    if "Prophet" in model_type:
+        try:
+            from prophet import Prophet
+            import numpy as np
+        except ImportError:
+            st.error("⚠️ Prophet no está instalado. Usando regresión lineal como fallback.")
+            model_type = "Regresión Lineal"
     
-    # Display metrics
-    st.subheader("📊 Métricas del Modelo")
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Confianza (R²)", f"{r2:.2%}")
-    col2.metric("Tendencia", "📈 Subiendo" if model.coef_[0] > 0 else "📉 Bajando")
-    col3.metric("Mes Actual", f"${current_month_sales:,.0f}")
-    col4.metric("Predicción Próximo Mes", f"${pred_1:,.0f}", delta=f"{change_pct:+.1f}%")
-    
-    st.markdown("---")
-    
-    # Prediction table
-    st.subheader("🗓️ Proyecciones")
-    pred_df = pd.DataFrame({
-        'Mes': ['Próximo Mes', 'En 2 Meses', 'En 3 Meses'],
-        'Predicción': [f"${pred_1:,.0f}", f"${pred_2:,.0f}", f"${pred_3:,.0f}"],
-        'vs Actual': [f"{change_pct:+.1f}%", 
-                     f"{((pred_2 - current_month_sales) / current_month_sales) * 100:+.1f}%",
-                     f"{((pred_3 - current_month_sales) / current_month_sales) * 100:+.1f}%"]
-    })
-    st.dataframe(pred_df, hide_index=True, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Chart with trend line and predictions
-    st.subheader("📈 Tendencia y Proyección")
-    
-    # Add predictions to chart data
-    future_months = pd.DataFrame({
-        'fecha': [f'Pred {i}' for i in range(1, 4)],
-        'month_num': [next_month_num, next_2_months, next_3_months],
-        'venta_neta': [pred_1, pred_2, pred_3],
-        'tipo': ['Predicción', 'Predicción', 'Predicción']
-    })
-    
-    chart_data = monthly.copy()
-    chart_data['tipo'] = 'Real'
-    chart_data = pd.concat([chart_data, future_months], ignore_index=True)
-    
-    # Create trend line
-    all_x = chart_data['month_num'].values.reshape(-1, 1)
-    trend_line = model.predict(all_x)
-    chart_data['tendencia'] = trend_line
-    
-    fig = px.line(chart_data, x='fecha', y='venta_neta', 
-                  color='tipo', markers=True,
-                  title='Ventas Mensuales + Proyección',
-                  template='plotly_dark',
-                  color_discrete_map={'Real': '#00d4aa', 'Predicción': '#ff6b6b'})
-    
-    # Add trend line
-    fig.add_scatter(x=chart_data['fecha'], y=chart_data['tendencia'], 
-                    mode='lines', name='Tendencia', line=dict(dash='dash', color='yellow'))
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Model explanation
-    with st.expander("ℹ️ ¿Cómo funciona la predicción?"):
-        st.markdown(f"""
-        **Modelo:** Regresión Lineal Simple
+    if "Prophet" in model_type:
+        # Prophet requires specific column names
+        prophet_df = monthly[['fecha', 'venta_neta']].copy()
+        prophet_df.columns = ['ds', 'y']
         
-        **Datos utilizados:** {len(monthly)} meses de ventas históricas
+        # Fit Prophet model with confidence intervals
+        model = Prophet(
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            interval_width=0.95  # 95% confidence interval
+        )
+        model.fit(prophet_df)
         
-        **Coeficiente (pendiente):** ${model.coef_[0]:,.2f} por mes
-        - Esto significa que en promedio las ventas {"aumentan" if model.coef_[0] > 0 else "disminuyen"} ${abs(model.coef_[0]):,.2f} cada mes
+        # Make future predictions
+        future = model.make_future_dataframe(periods=3, freq='MS')
+        forecast = model.predict(future)
         
-        **Confianza (R²):** {r2:.2%}
-        - Valores más altos = modelo más confiable
-        - >70% = bueno, >80% = muy bueno
+        # Get predictions with confidence intervals
+        future_preds = forecast.tail(3)
+        pred_1 = future_preds.iloc[0]['yhat']
+        pred_2 = future_preds.iloc[1]['yhat']
+        pred_3 = future_preds.iloc[2]['yhat']
         
-        **Limitaciones:**
-        - Asume tendencia lineal constante
-        - No considera estacionalidad
-        - Mejor para corto plazo (1-3 meses)
-        """)
+        # Confidence intervals
+        ci_lower_1 = future_preds.iloc[0]['yhat_lower']
+        ci_upper_1 = future_preds.iloc[0]['yhat_upper']
+        
+        # Calculate metrics on training data
+        train_preds = forecast.head(len(monthly))
+        y_true = monthly['venta_neta'].values
+        y_pred = train_preds['yhat'].values
+        
+        # MAPE and MAE
+        mape = np.mean(np.abs((y_true - y_pred) / y_true)) * 100
+        mae = np.mean(np.abs(y_true - y_pred))
+        
+        change_pct = ((pred_1 - current_month_sales) / current_month_sales) * 100
+        
+        # Display metrics with styled cards
+        st.markdown("### 📊 Métricas del Modelo Prophet")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            styled_metric("MAPE (Error %)", f"{mape:.1f}%", delta=-mape if mape < 20 else mape, delta_color="inverse")
+        with col2:
+            styled_metric("MAE (Error $)", f"${mae:,.0f}", delta=None)
+        with col3:
+            styled_metric("Mes Actual", f"${current_month_sales:,.0f}", delta=None)
+        with col4:
+            styled_metric("Predicción Próx. Mes", f"${pred_1:,.0f}", delta=change_pct)
+        
+        st.markdown("---")
+        
+        # Prediction table with confidence intervals
+        st.subheader("🗓️ Proyecciones con Intervalos de Confianza (95%)")
+        pred_df = pd.DataFrame({
+            'Mes': ['Próximo Mes', 'En 2 Meses', 'En 3 Meses'],
+            'Predicción': [f"${pred_1:,.0f}", f"${pred_2:,.0f}", f"${pred_3:,.0f}"],
+            'Rango Inferior': [f"${future_preds.iloc[i]['yhat_lower']:,.0f}" for i in range(3)],
+            'Rango Superior': [f"${future_preds.iloc[i]['yhat_upper']:,.0f}" for i in range(3)],
+            'vs Actual': [f"{((future_preds.iloc[i]['yhat'] - current_month_sales) / current_month_sales * 100):+.1f}%" for i in range(3)]
+        })
+        st.dataframe(pred_df, hide_index=True, use_container_width=True)
+        export_dataframe(pred_df, "predicciones_ventas", "pred_ventas")
+        
+        st.markdown("---")
+        
+        # Chart with confidence band
+        st.subheader("📈 Tendencia, Estacionalidad y Proyección")
+        
+        fig = px.line(template='plotly_dark')
+        
+        # Historical data
+        fig.add_scatter(x=monthly['fecha'], y=monthly['venta_neta'], 
+                       mode='lines+markers', name='Ventas Reales', line=dict(color='#00d4aa'))
+        
+        # Predictions with confidence band
+        fig.add_scatter(x=forecast['ds'], y=forecast['yhat'], 
+                       mode='lines', name='Predicción', line=dict(color='#ff6b6b'))
+        
+        # Confidence band
+        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_upper'],
+                       mode='lines', name='Límite Superior', line=dict(dash='dash', color='rgba(255,107,107,0.3)'))
+        fig.add_scatter(x=forecast['ds'], y=forecast['yhat_lower'],
+                       mode='lines', name='Límite Inferior', line=dict(dash='dash', color='rgba(255,107,107,0.3)'),
+                       fill='tonexty', fillcolor='rgba(255,107,107,0.1)')
+        
+        fig.update_layout(title='Ventas Mensuales + Proyección con Intervalo de Confianza 95%',
+                         xaxis_title='Fecha', yaxis_title='Ventas ($)')
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Model explanation
+        show_model_explanation(
+            "Prophet (Facebook)",
+            """
+            Prophet es un modelo de series temporales desarrollado por Facebook/Meta que:
+            - Detecta automáticamente tendencia y estacionalidad
+            - Maneja datos faltantes y outliers
+            - Proporciona intervalos de confianza
+            - Es robusto para datos de negocio con patrones anuales
+            """,
+            {"MAPE": f"{mape:.1f}%", "MAE": f"${mae:,.0f}"},
+            "Un MAPE < 20% indica buena precisión. El intervalo de confianza muestra el rango donde probablemente estarán las ventas reales."
+        )
+        
+    else:
+        # Fallback to linear regression
+        from sklearn.linear_model import LinearRegression
+        import numpy as np
+        
+        monthly['month_num'] = range(1, len(monthly) + 1)
+        X = monthly['month_num'].values.reshape(-1, 1)
+        y = monthly['venta_neta'].values
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        pred_1 = model.predict([[len(monthly) + 1]])[0]
+        pred_2 = model.predict([[len(monthly) + 2]])[0]
+        pred_3 = model.predict([[len(monthly) + 3]])[0]
+        
+        r2 = model.score(X, y)
+        y_pred = model.predict(X)
+        mae = np.mean(np.abs(y - y_pred))
+        
+        change_pct = ((pred_1 - current_month_sales) / current_month_sales) * 100
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("R² Score", f"{r2:.2%}")
+        col2.metric("MAE", f"${mae:,.0f}")
+        col3.metric("Mes Actual", f"${current_month_sales:,.0f}")
+        col4.metric("Predicción Próx. Mes", f"${pred_1:,.0f}", delta=f"{change_pct:+.1f}%")
+        
+        st.info("💡 La regresión lineal es más simple pero no captura estacionalidad. Considera usar Prophet para mejores resultados.")
 
 
 # --- ADDITIONAL ML FUNCTIONS ---
@@ -1749,83 +1878,157 @@ def render_churn_prediction():
 
 
 def render_product_associations():
-    """Find products that are frequently bought together."""
+    """Find products that are frequently bought together using Apriori algorithm."""
     st.title("🛒 Productos que se Compran Juntos")
-    st.caption("Análisis de asociación para cross-selling")
+    st.caption("Análisis de reglas de asociación para cross-selling (algoritmo Apriori)")
+    
+    try:
+        from mlxtend.frequent_patterns import apriori, association_rules
+        from mlxtend.preprocessing import TransactionEncoder
+        use_apriori = True
+    except ImportError:
+        use_apriori = False
+        st.info("💡 Usando análisis básico de co-ocurrencia. Instala mlxtend para el algoritmo Apriori completo.")
     
     # Group by invoice to find co-purchases
     invoice_products = df.groupby('factura_id')['producto'].apply(list).reset_index()
+    transactions = invoice_products['producto'].tolist()
     
-    # Count co-occurrences
-    from collections import defaultdict
-    cooccurrence = defaultdict(int)
-    product_counts = defaultdict(int)
-    
-    for products in invoice_products['producto']:
-        unique_products = list(set(products))
-        for p in unique_products:
-            product_counts[p] += 1
-        for i, p1 in enumerate(unique_products):
-            for p2 in unique_products[i+1:]:
-                pair = tuple(sorted([p1, p2]))
-                cooccurrence[pair] += 1
-    
-    # Convert to dataframe
-    pairs_data = []
-    for (p1, p2), count in cooccurrence.items():
-        if count >= 3:  # Minimum 3 co-occurrences
-            support = count / len(invoice_products)
-            confidence_1 = count / product_counts[p1] if product_counts[p1] > 0 else 0
-            confidence_2 = count / product_counts[p2] if product_counts[p2] > 0 else 0
-            pairs_data.append({
-                'producto_1': p1,
-                'producto_2': p2,
-                'veces_juntos': count,
-                'soporte': support,
-                'confianza': max(confidence_1, confidence_2)
-            })
-    
-    pairs_df = pd.DataFrame(pairs_data).sort_values('veces_juntos', ascending=False)
-    
-    if pairs_df.empty:
-        st.warning("No se encontraron suficientes asociaciones de productos")
-        return
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Pares Encontrados", len(pairs_df))
-    col2.metric("Par Más Frecuente", f"{pairs_df.iloc[0]['veces_juntos']} veces")
-    col3.metric("Mejor Confianza", f"{pairs_df['confianza'].max():.0%}")
-    
-    st.markdown("---")
-    
-    # Top pairs
-    st.subheader("🔗 Top 20 Pares de Productos")
-    top_pairs = pairs_df.head(20).copy()
-    top_pairs['soporte'] = top_pairs['soporte'].apply(lambda x: f"{x:.1%}")
-    top_pairs['confianza'] = top_pairs['confianza'].apply(lambda x: f"{x:.0%}")
-    top_pairs.columns = ['Producto 1', 'Producto 2', 'Veces Juntos', 'Soporte', 'Confianza']
-    st.dataframe(top_pairs, hide_index=True, use_container_width=True)
+    if use_apriori:
+        # Use Apriori algorithm
+        te = TransactionEncoder()
+        te_array = te.fit_transform(transactions)
+        basket_df = pd.DataFrame(te_array, columns=te.columns_)
+        
+        # Find frequent itemsets
+        min_support = st.slider("Soporte mínimo:", 0.01, 0.2, 0.02, 0.01, 
+                                help="Fracción mínima de transacciones donde aparece el par")
+        
+        frequent_items = apriori(basket_df, min_support=min_support, use_colnames=True)
+        
+        if len(frequent_items) < 2:
+            st.warning("No se encontraron suficientes itemsets frecuentes. Intenta reducir el soporte mínimo.")
+            return
+        
+        # Generate association rules
+        rules = association_rules(frequent_items, metric="lift", min_threshold=1.0, num_itemsets=len(frequent_items))
+        
+        if rules.empty:
+            st.warning("No se encontraron reglas de asociación significativas.")
+            return
+        
+        # Filter to pairs only
+        rules = rules[rules['antecedents'].apply(len) == 1]
+        rules = rules[rules['consequents'].apply(len) == 1]
+        rules['antecedent'] = rules['antecedents'].apply(lambda x: list(x)[0])
+        rules['consequent'] = rules['consequents'].apply(lambda x: list(x)[0])
+        rules = rules.sort_values('lift', ascending=False)
+        
+        # Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Reglas Encontradas", len(rules))
+        col2.metric("Mejor Lift", f"{rules['lift'].max():.2f}x")
+        col3.metric("Confianza Promedio", f"{rules['confidence'].mean():.0%}")
+        col4.metric("Soporte Promedio", f"{rules['support'].mean():.1%}")
+        
+        st.markdown("---")
+        
+        # Explanation
+        show_model_explanation(
+            "Algoritmo Apriori",
+            """
+            El algoritmo Apriori encuentra patrones frecuentes en transacciones:
+            
+            - **Soporte**: Fracción de transacciones que contienen el par (más alto = más común)
+            - **Confianza**: Probabilidad de comprar B dado que compró A (más alto = más predecible)
+            - **Lift**: Cuántas veces más probable es la compra conjunta vs. independiente
+              - Lift > 1 = asociación positiva (compran juntos más de lo esperado)
+              - Lift = 1 = independientes
+              - Lift < 1 = asociación negativa
+            """,
+            {"Reglas": len(rules), "Mejor Lift": f"{rules['lift'].max():.2f}x"},
+            "Usa estas reglas para sugerir productos complementarios en el checkout o en campañas de email."
+        )
+        
+        st.markdown("---")
+        
+        # Top rules table
+        st.subheader("🔗 Top Reglas de Asociación")
+        top_rules = rules.head(30)[['antecedent', 'consequent', 'support', 'confidence', 'lift']].copy()
+        top_rules['support'] = top_rules['support'].apply(lambda x: f"{x:.1%}")
+        top_rules['confidence'] = top_rules['confidence'].apply(lambda x: f"{x:.0%}")
+        top_rules['lift'] = top_rules['lift'].apply(lambda x: f"{x:.2f}x")
+        top_rules.columns = ['Si compra...', 'También compra...', 'Soporte', 'Confianza', 'Lift']
+        st.dataframe(top_rules, hide_index=True, use_container_width=True)
+        export_dataframe(top_rules, "reglas_asociacion", "assoc_rules")
+        
+    else:
+        # Fallback to basic co-occurrence
+        from collections import defaultdict
+        cooccurrence = defaultdict(int)
+        product_counts = defaultdict(int)
+        
+        for products in transactions:
+            unique_products = list(set(products))
+            for p in unique_products:
+                product_counts[p] += 1
+            for i, p1 in enumerate(unique_products):
+                for p2 in unique_products[i+1:]:
+                    pair = tuple(sorted([p1, p2]))
+                    cooccurrence[pair] += 1
+        
+        pairs_data = []
+        n_trans = len(transactions)
+        for (p1, p2), count in cooccurrence.items():
+            if count >= 3:
+                support = count / n_trans
+                conf_1 = count / product_counts[p1] if product_counts[p1] > 0 else 0
+                conf_2 = count / product_counts[p2] if product_counts[p2] > 0 else 0
+                # Calculate lift
+                expected = (product_counts[p1] / n_trans) * (product_counts[p2] / n_trans)
+                lift = support / expected if expected > 0 else 1
+                pairs_data.append({
+                    'producto_1': p1, 'producto_2': p2, 'veces_juntos': count,
+                    'soporte': support, 'confianza': max(conf_1, conf_2), 'lift': lift
+                })
+        
+        pairs_df = pd.DataFrame(pairs_data).sort_values('lift', ascending=False)
+        
+        if pairs_df.empty:
+            st.warning("No se encontraron asociaciones")
+            return
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Pares Encontrados", len(pairs_df))
+        col2.metric("Mejor Lift", f"{pairs_df['lift'].max():.2f}x")
+        col3.metric("Mejor Confianza", f"{pairs_df['confianza'].max():.0%}")
+        
+        st.markdown("---")
+        st.subheader("🔗 Top 20 Pares de Productos")
+        top_pairs = pairs_df.head(20).copy()
+        top_pairs['soporte'] = top_pairs['soporte'].apply(lambda x: f"{x:.1%}")
+        top_pairs['confianza'] = top_pairs['confianza'].apply(lambda x: f"{x:.0%}")
+        top_pairs['lift'] = top_pairs['lift'].apply(lambda x: f"{x:.2f}x")
+        top_pairs.columns = ['Producto 1', 'Producto 2', 'Veces Juntos', 'Soporte', 'Confianza', 'Lift']
+        st.dataframe(top_pairs, hide_index=True, use_container_width=True)
+        export_dataframe(top_pairs, "pares_productos", "prod_pairs")
     
     st.markdown("---")
     
     # Product selector for recommendations
-    st.subheader("🎯 Buscar Recomendaciones")
+    st.subheader("🎯 Buscar Recomendaciones para un Producto")
     all_products = sorted(df['producto'].unique())
-    selected_product = st.selectbox("Selecciona un producto:", all_products)
+    selected_product = st.selectbox("Selecciona un producto:", all_products, key="assoc_product")
     
-    if selected_product:
-        # Find top associated products
-        associated = pairs_df[(pairs_df['producto_1'] == selected_product) | (pairs_df['producto_2'] == selected_product)].copy()
-        if not associated.empty:
-            associated['otro_producto'] = associated.apply(
-                lambda x: x['producto_2'] if x['producto_1'] == selected_product else x['producto_1'], axis=1)
-            associated = associated.nlargest(10, 'veces_juntos')
-            
-            st.success(f"**Clientes que compran '{selected_product[:30]}...' también compran:**")
-            for _, row in associated.iterrows():
-                st.write(f"• {row['otro_producto']} ({row['veces_juntos']} veces)")
+    if selected_product and use_apriori:
+        # Find best recommendations
+        recs = rules[rules['antecedent'] == selected_product].nlargest(10, 'lift')
+        if not recs.empty:
+            st.success(f"**Clientes que compran '{selected_product[:40]}...' también compran:**")
+            for _, row in recs.iterrows():
+                st.write(f"• **{row['consequent']}** (Lift: {row['lift']:.2f}x, Confianza: {row['confidence']:.0%})")
         else:
-            st.info("No se encontraron asociaciones significativas para este producto")
+            st.info("No se encontraron recomendaciones para este producto")
 
 
 def render_product_demand():
