@@ -1951,18 +1951,19 @@ def render_product_associations():
         te_array = te.fit_transform(transactions)
         basket_df = pd.DataFrame(te_array, columns=te.columns_)
         
-        # Find frequent itemsets
-        min_support = st.slider("Soporte mínimo:", 0.01, 0.2, 0.02, 0.01, 
-                                help="Fracción mínima de transacciones donde aparece el par")
+        # Find frequent itemsets - lower thresholds to find more associations
+        st.info("💡 **Tip:** Baja el soporte mínimo para ver más asociaciones (incluso las menos frecuentes)")
+        min_support = st.slider("Soporte mínimo:", 0.001, 0.1, 0.005, 0.001, 
+                                help="Fracción mínima de transacciones donde aparece el par. Valor más bajo = más asociaciones")
         
         frequent_items = apriori(basket_df, min_support=min_support, use_colnames=True)
         
         if len(frequent_items) < 2:
-            st.warning("No se encontraron suficientes itemsets frecuentes. Intenta reducir el soporte mínimo.")
+            st.warning("No se encontraron suficientes itemsets frecuentes. Intenta reducir el soporte mínimo aún más.")
             return
         
-        # Generate association rules
-        rules = association_rules(frequent_items, metric="lift", min_threshold=1.0, num_itemsets=len(frequent_items))
+        # Generate association rules - lower lift threshold to include more
+        rules = association_rules(frequent_items, metric="lift", min_threshold=0.5, num_itemsets=len(frequent_items))
         
         if rules.empty:
             st.warning("No se encontraron reglas de asociación significativas.")
