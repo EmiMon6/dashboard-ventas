@@ -99,6 +99,97 @@ async def upload_data(file: UploadFile = File(...)):
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+@app.get("/api/rfm-segments")
+def get_rfm_segments():
+    """
+    Get RFM (Recency, Frequency, Monetary) segmentation of customers.
+    Returns customer segments with their metrics and recommended actions.
+    """
+    import pandas as pd
+    df = get_df()
+    today = df['fecha'].max()
+    
+    # Calculate RFM metrics per customer
+    rfm = df.groupby('cliente_nombre').agg({
+        'fecha': 'max',           # Last purchase date (Recency)
+        'factura_id': 'nunique',  # Number of transactions (Frequency)
+        'venta_neta': 'sum'       # Total revenue (Monetary)
+    }).reset_index()
+    
+    rfm.columns = ['cliente', 'ultima_compra', 'frecuencia', 'valor_monetario']
+    rfm['recencia'] = (today - rfm['ultima_compra']).dt.days
+    
+    # Assign scores 1-5 using quintiles (5 = best)
+    rfm['R_score'] = pd.qcut(rfm['recencia'], 5, labels=[5, 4, 3, 2, 1], duplicates='drop').astype(int)
+    rfm['F_score'] = pd.qcut(rfm['frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+    rfm['M_score'] = pd.qcut(rfm['valor_monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+    
+    rfm['RFM_score'] = rfm['R_score'].astype(str) + rfm['F_score'].astype(str) + rfm['M_score'].astype(str)
+    rfm['RFM_total'] = rfm['R_score'] + rfm['F_score'] + rfm['M_score']
+    
+    # Assign segments
+    def assign_segment(row):
+        r, f, m = row['R_score'], row['F_score'], row['M_score']
+        if r >= 4 and f >= 4 and m >= 4:
+            return 'VIP'
+        elif r >= 4 and f >= 4:
+            return 'Leal'
+        elif r >= 4 and m >= 4:
+            return 'Potencial'
+        elif r <= 2 and f >= 3 and m >= 3:
+            return 'En Riesgo'
+        elif r <= 2 and m >= 3:
+            return 'Dormidos'
+        elif r <= 2:
+            return 'Perdidos'
+        elif r >= 4 and f <= 2:
+            return 'Nuevos'
+        else:
+            return 'Regular'
+    
+    rfm['segmento'] = rfm.apply(assign_segment, axis=1)
+    
+    # Build response
+    segment_summary = rfm.groupby('segmento').agg({
+        'cliente': 'count',
+        'valor_monetario': 'sum',
+        'frecuencia': 'mean',
+        'recencia': 'mean'
+    }).reset_index()
+    segment_summary.columns = ['segmento', 'cantidad_clientes', 'valor_total', 'frecuencia_promedio', 'recencia_promedio']
+    
+    # Top customers per segment (max 10 each)
+    segments_detail = {}
+    for seg in rfm['segmento'].unique():
+        seg_df = rfm[rfm['segmento'] == seg].nlargest(10, 'valor_monetario')
+        segments_detail[seg] = [
+            {
+                'cliente': row['cliente'],
+                'recencia': int(row['recencia']),
+                'frecuencia': int(row['frecuencia']),
+                'valor_monetario': round(row['valor_monetario'], 2),
+                'rfm_score': row['RFM_score']
+            }
+            for _, row in seg_df.iterrows()
+        ]
+    
+    return {
+        "fecha_generacion": datetime.now().isoformat(),
+        "total_clientes": len(rfm),
+        "resumen_segmentos": [
+            {
+                "segmento": row['segmento'],
+                "cantidad_clientes": int(row['cantidad_clientes']),
+                "valor_total": round(row['valor_total'], 2),
+                "frecuencia_promedio": round(row['frecuencia_promedio'], 1),
+                "recencia_promedio": round(row['recencia_promedio'], 0)
+            }
+            for _, row in segment_summary.iterrows()
+        ],
+        "detalle_segmentos": segments_detail
+    }
+
 @app.post("/api/push-to-n8n")
 def push_to_n8n():
 

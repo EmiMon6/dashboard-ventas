@@ -158,7 +158,7 @@ if df.empty:
 
 # Sidebar Navigation
 st.sidebar.title("Navegación")
-view_options = ["Visión General", "📢 Recordatorios", "Análisis por Categoría", "Categorías Agrupadas", "Análisis de Recencia", "Explorador de Clientes", "Datos Crudos", "⚙️ Configuración"]
+view_options = ["Visión General", "📢 Recordatorios", "🎯 Segmentación RFM", "Análisis por Categoría", "Categorías Agrupadas", "Análisis de Recencia", "Explorador de Clientes", "Datos Crudos", "⚙️ Configuración"]
 selected_view = st.sidebar.radio("Ir a la sección:", view_options)
 
 # Sidebar Filters (Global)
@@ -1011,12 +1011,214 @@ def render_reminders():
     
     - `POST /api/push-to-n8n` - Enviar todos los datos a n8n
     - `GET /api/reminders` - Obtener todos los recordatorios
+    - `GET /api/rfm-segments` - Obtener segmentación RFM
     
     **Para enviar a n8n:**
     ```bash
     curl -X POST http://localhost:8502/api/push-to-n8n
     ```
     """)
+
+
+def calculate_rfm_scores(dataframe):
+    """Calculate RFM scores for each customer."""
+    today = dataframe['fecha'].max()
+    
+    # Calculate RFM metrics per customer
+    rfm = dataframe.groupby('cliente_nombre').agg({
+        'fecha': 'max',           # Last purchase date (Recency)
+        'factura_id': 'nunique',  # Number of transactions (Frequency)
+        'venta_neta': 'sum'       # Total revenue (Monetary)
+    }).reset_index()
+    
+    rfm.columns = ['cliente', 'ultima_compra', 'frecuencia', 'valor_monetario']
+    rfm['recencia'] = (today - rfm['ultima_compra']).dt.days
+    
+    # Assign scores 1-5 using quintiles (5 = best)
+    # For recency: lower is better, so we invert
+    rfm['R_score'] = pd.qcut(rfm['recencia'], 5, labels=[5, 4, 3, 2, 1], duplicates='drop').astype(int)
+    rfm['F_score'] = pd.qcut(rfm['frecuencia'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+    rfm['M_score'] = pd.qcut(rfm['valor_monetario'].rank(method='first'), 5, labels=[1, 2, 3, 4, 5], duplicates='drop').astype(int)
+    
+    # Combined RFM score
+    rfm['RFM_score'] = rfm['R_score'].astype(str) + rfm['F_score'].astype(str) + rfm['M_score'].astype(str)
+    rfm['RFM_total'] = rfm['R_score'] + rfm['F_score'] + rfm['M_score']
+    
+    # Assign segments based on RFM scores
+    def assign_segment(row):
+        r, f, m = row['R_score'], row['F_score'], row['M_score']
+        
+        if r >= 4 and f >= 4 and m >= 4:
+            return '🏆 VIP'
+        elif r >= 4 and f >= 4:
+            return '💎 Leal'
+        elif r >= 4 and m >= 4:
+            return '🌟 Potencial'
+        elif r <= 2 and f >= 3 and m >= 3:
+            return '⚠️ En Riesgo'
+        elif r <= 2 and m >= 3:
+            return '💤 Dormidos'
+        elif r <= 2:
+            return '👋 Perdidos'
+        elif r >= 4 and f <= 2:
+            return '🆕 Nuevos'
+        else:
+            return '📊 Regular'
+    
+    rfm['segmento'] = rfm.apply(assign_segment, axis=1)
+    
+    return rfm
+
+
+def render_rfm_segmentation():
+    st.title("🎯 Segmentación RFM de Clientes")
+    st.caption("Clasifica clientes según Recencia, Frecuencia y Valor Monetario")
+    
+    # Calculate RFM
+    rfm = calculate_rfm_scores(df)
+    
+    # Explanation
+    with st.expander("📖 ¿Qué significa cada segmento?"):
+        st.markdown("""
+        | Segmento | Descripción | Acción Recomendada |
+        |----------|-------------|-------------------|
+        | 🏆 **VIP** | Mejores clientes, compran mucho y reciente | Retener, dar trato preferencial |
+        | 💎 **Leal** | Compran seguido, mantenerlos felices | Programas de fidelización |
+        | 🌟 **Potencial** | Recientes con alto gasto | Convertir en VIP |
+        | ⚠️ **En Riesgo** | Buenos pero dejaron de comprar | Recuperar urgentemente |
+        | 💤 **Dormidos** | Alto valor histórico pero inactivos | Campañas de reactivación |
+        | 👋 **Perdidos** | Ya casi no compran | Última oportunidad |
+        | 🆕 **Nuevos** | Clientes nuevos a fidelizar | Onboarding, bienvenida |
+        | 📊 **Regular** | Sin características distintivas | Monitorear |
+        """)
+    
+    st.markdown("---")
+    
+    # --- KEY METRICS ---
+    segment_stats = rfm.groupby('segmento').agg({
+        'cliente': 'count',
+        'valor_monetario': 'sum',
+        'frecuencia': 'mean',
+        'recencia': 'mean'
+    }).reset_index()
+    segment_stats.columns = ['Segmento', 'Clientes', 'Valor Total', 'Freq. Promedio', 'Recencia Promedio']
+    segment_stats = segment_stats.sort_values('Valor Total', ascending=False)
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Clientes", len(rfm))
+    col2.metric("Clientes VIP", len(rfm[rfm['segmento'] == '🏆 VIP']))
+    col3.metric("En Riesgo", len(rfm[rfm['segmento'] == '⚠️ En Riesgo']))
+    col4.metric("Valor Total", f"${rfm['valor_monetario'].sum():,.0f}")
+    
+    st.markdown("---")
+    
+    # --- VISUALIZATIONS ---
+    col_left, col_right = st.columns(2)
+    
+    with col_left:
+        st.subheader("📊 Distribución por Segmento")
+        
+        # Define colors for segments
+        segment_colors = {
+            '🏆 VIP': '#FFD700',
+            '💎 Leal': '#00CED1',
+            '🌟 Potencial': '#9370DB',
+            '⚠️ En Riesgo': '#FF6B6B',
+            '💤 Dormidos': '#708090',
+            '👋 Perdidos': '#8B0000',
+            '🆕 Nuevos': '#32CD32',
+            '📊 Regular': '#4169E1'
+        }
+        
+        fig_pie = px.pie(
+            segment_stats,
+            values='Clientes',
+            names='Segmento',
+            title='Clientes por Segmento',
+            template='plotly_dark',
+            color='Segmento',
+            color_discrete_map=segment_colors
+        )
+        fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+        st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with col_right:
+        st.subheader("💰 Valor por Segmento")
+        
+        fig_bar = px.bar(
+            segment_stats,
+            x='Segmento',
+            y='Valor Total',
+            color='Segmento',
+            title='Valor Monetario por Segmento',
+            template='plotly_dark',
+            color_discrete_map=segment_colors
+        )
+        fig_bar.update_layout(showlegend=False)
+        st.plotly_chart(fig_bar, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # --- SCATTER PLOT ---
+    st.subheader("🔍 Mapa de Clientes (Recencia vs Valor)")
+    
+    fig_scatter = px.scatter(
+        rfm,
+        x='recencia',
+        y='valor_monetario',
+        color='segmento',
+        size='frecuencia',
+        hover_name='cliente',
+        hover_data={'recencia': True, 'frecuencia': True, 'valor_monetario': ':.2f'},
+        title='Todos los Clientes: Recencia vs Valor Monetario (tamaño = frecuencia)',
+        template='plotly_dark',
+        color_discrete_map=segment_colors
+    )
+    fig_scatter.add_vline(x=90, line_dash="dash", line_color="red", annotation_text="90 días")
+    fig_scatter.update_layout(
+        xaxis_title="Días desde última compra",
+        yaxis_title="Valor monetario total ($)"
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # --- DETAILED TABLE ---
+    st.subheader("📋 Detalle por Cliente")
+    
+    # Segment filter
+    selected_segments = st.multiselect(
+        "Filtrar por segmento:",
+        options=rfm['segmento'].unique(),
+        default=rfm['segmento'].unique()
+    )
+    
+    filtered_rfm = rfm[rfm['segmento'].isin(selected_segments)]
+    
+    # Sort options
+    sort_by = st.selectbox(
+        "Ordenar por:",
+        options=['valor_monetario', 'recencia', 'frecuencia', 'RFM_total'],
+        format_func=lambda x: {'valor_monetario': 'Valor ($)', 'recencia': 'Recencia', 'frecuencia': 'Frecuencia', 'RFM_total': 'Score RFM'}[x]
+    )
+    
+    sorted_rfm = filtered_rfm.sort_values(sort_by, ascending=(sort_by == 'recencia'))
+    
+    # Display table
+    display_df = sorted_rfm[['cliente', 'segmento', 'recencia', 'frecuencia', 'valor_monetario', 'R_score', 'F_score', 'M_score', 'RFM_score']].copy()
+    display_df.columns = ['Cliente', 'Segmento', 'Días Sin Comprar', 'Transacciones', 'Valor Total', 'R', 'F', 'M', 'Score']
+    display_df['Valor Total'] = display_df['Valor Total'].apply(lambda x: f"${x:,.2f}")
+    
+    st.dataframe(display_df.head(50), hide_index=True, use_container_width=True)
+    
+    # Summary stats
+    st.markdown("---")
+    st.subheader("📈 Resumen por Segmento")
+    summary_display = segment_stats.copy()
+    summary_display['Valor Total'] = summary_display['Valor Total'].apply(lambda x: f"${x:,.0f}")
+    summary_display['Freq. Promedio'] = summary_display['Freq. Promedio'].apply(lambda x: f"{x:.1f}")
+    summary_display['Recencia Promedio'] = summary_display['Recencia Promedio'].apply(lambda x: f"{x:.0f} días")
+    st.dataframe(summary_display, hide_index=True, use_container_width=True)
 
 
 
@@ -1062,6 +1264,8 @@ if selected_view == "Visión General":
     render_overview()
 elif selected_view == "📢 Recordatorios":
     render_reminders()
+elif selected_view == "🎯 Segmentación RFM":
+    render_rfm_segmentation()
 elif selected_view == "Análisis por Categoría":
     render_category_analysis()
 elif selected_view == "Categorías Agrupadas":
