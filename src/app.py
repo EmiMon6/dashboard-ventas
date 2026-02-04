@@ -217,9 +217,10 @@ def check_password():
 if not check_password():
     st.stop()
 
-# Custom CSS for Dark/Premium Look
+# Custom CSS for Dark/Premium Look + Mobile Responsiveness
 st.markdown("""
     <style>
+    /* === BASE STYLES === */
     .main {
         background-color: #0e1117;
     }
@@ -228,6 +229,255 @@ st.markdown("""
         padding: 15px;
         border-radius: 10px;
         border: 1px solid #3d3f4b;
+    }
+    
+    /* === MOBILE RESPONSIVE STYLES === */
+    @media (max-width: 768px) {
+        /* Make sidebar collapsible and smaller */
+        [data-testid="stSidebar"] {
+            min-width: 0 !important;
+        }
+        
+        [data-testid="stSidebar"][aria-expanded="true"] {
+            min-width: 280px !important;
+            max-width: 280px !important;
+        }
+        
+        /* Larger touch targets for sidebar items */
+        [data-testid="stSidebar"] .stRadio > div {
+            gap: 0.5rem !important;
+        }
+        
+        [data-testid="stSidebar"] .stRadio label {
+            padding: 0.75rem 1rem !important;
+            font-size: 1rem !important;
+            min-height: 48px !important;
+            display: flex !important;
+            align-items: center !important;
+        }
+        
+        /* Main content adjustments */
+        .main .block-container {
+            padding: 1rem 0.75rem !important;
+            max-width: 100% !important;
+        }
+        
+        /* Titles - Larger and centered on mobile */
+        .main h1 {
+            font-size: 1.5rem !important;
+            text-align: center !important;
+            padding: 0 0.5rem !important;
+        }
+        
+        .main h2 {
+            font-size: 1.25rem !important;
+        }
+        
+        .main h3 {
+            font-size: 1.1rem !important;
+        }
+        
+        /* Metrics - Stack vertically and make them bigger */
+        [data-testid="stMetric"] {
+            padding: 1rem !important;
+            margin-bottom: 0.5rem !important;
+        }
+        
+        [data-testid="stMetric"] [data-testid="stMetricValue"] {
+            font-size: 1.75rem !important;
+            font-weight: 700 !important;
+        }
+        
+        [data-testid="stMetric"] [data-testid="stMetricLabel"] {
+            font-size: 0.85rem !important;
+        }
+        
+        /* === CRITICAL: FORCE SINGLE COLUMN LAYOUT === */
+        /* This prevents horizontal scroll on mobile */
+        
+        /* Force all columns to stack vertically */
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+        }
+        
+        /* Force horizontal layouts to wrap */
+        .row-widget.stHorizontal,
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+            flex-wrap: wrap !important;
+        }
+        
+        .row-widget.stHorizontal > div,
+        [data-testid="stHorizontalBlock"] > div {
+            width: 100% !important;
+            min-width: 100% !important;
+            max-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        
+        /* Prevent any overflow */
+        .main, .block-container, [data-testid="stAppViewContainer"] {
+            overflow-x: hidden !important;
+            max-width: 100vw !important;
+        }
+        
+        /* Charts must fit screen */
+        .stPlotlyChart, .js-plotly-plot, .plot-container {
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+        
+        .js-plotly-plot .plotly {
+            width: 100% !important;
+        }
+        
+        /* Images and media */
+        img, video, iframe {
+            max-width: 100% !important;
+            height: auto !important;
+        }
+        
+        /* Tables - Horizontal scroll with indicator */
+        [data-testid="stDataFrame"],
+        .stDataFrame {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        
+        [data-testid="stDataFrame"]::after {
+            content: "← Desliza para ver más →";
+            display: block;
+            text-align: center;
+            font-size: 0.75rem;
+            color: #666;
+            padding: 0.5rem;
+        }
+        
+        /* Buttons - Bigger touch targets */
+        .stButton > button {
+            min-height: 48px !important;
+            font-size: 1rem !important;
+            padding: 0.5rem 1rem !important;
+            width: 100% !important;
+        }
+        
+        .stDownloadButton > button {
+            min-height: 44px !important;
+            font-size: 0.9rem !important;
+            width: 100% !important;
+            margin-bottom: 0.5rem !important;
+        }
+        
+        /* Input fields - Larger for easier typing */
+        .stTextInput input,
+        .stSelectbox select,
+        .stNumberInput input {
+            min-height: 48px !important;
+            font-size: 16px !important; /* Prevents iOS zoom */
+            padding: 0.75rem !important;
+        }
+        
+        /* Charts - Full width */
+        [data-testid="stPlotlyChart"] {
+            width: 100% !important;
+        }
+        
+        .js-plotly-plot {
+            width: 100% !important;
+        }
+        
+        /* Expander - Easier to tap */
+        .streamlit-expanderHeader {
+            min-height: 48px !important;
+            font-size: 1rem !important;
+            padding: 0.75rem !important;
+        }
+        
+        /* Tabs - Larger touch targets */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 0 !important;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            min-height: 48px !important;
+            padding: 0.75rem 1rem !important;
+            font-size: 0.9rem !important;
+            flex: 1 !important;
+            justify-content: center !important;
+        }
+        
+        /* Sliders - Bigger touch area */
+        .stSlider [data-testid="stTickBar"] {
+            padding: 1rem 0 !important;
+        }
+        
+        .stSlider [data-baseweb="slider"] {
+            margin-top: 1rem !important;
+        }
+        
+        /* Radio buttons - Bigger */
+        .stRadio > div {
+            gap: 0.25rem !important;
+        }
+        
+        .stRadio label {
+            padding: 0.6rem 1rem !important;
+            font-size: 0.95rem !important;
+            min-height: 44px !important;
+        }
+        
+        /* Success/Warning/Error messages - More prominent */
+        .stSuccess, .stWarning, .stError, .stInfo {
+            padding: 1rem !important;
+            font-size: 0.95rem !important;
+        }
+        
+        /* Captions - Slightly larger */
+        .stCaption {
+            font-size: 0.85rem !important;
+        }
+        
+        /* Dividers */
+        hr {
+            margin: 1rem 0 !important;
+        }
+        
+        /* Plotly chart legend - Hide on very small screens */
+        .legend {
+            font-size: 10px !important;
+        }
+    }
+    
+    /* === EXTRA SMALL PHONES (iPhone SE, etc.) === */
+    @media (max-width: 375px) {
+        .main h1 {
+            font-size: 1.25rem !important;
+        }
+        
+        [data-testid="stMetric"] [data-testid="stMetricValue"] {
+            font-size: 1.5rem !important;
+        }
+        
+        .stTabs [data-baseweb="tab"] {
+            padding: 0.5rem 0.75rem !important;
+            font-size: 0.8rem !important;
+        }
+        
+        .row-widget.stHorizontal > div {
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+    }
+    
+    /* === LANDSCAPE MOBILE === */
+    @media (max-width: 768px) and (orientation: landscape) {
+        .row-widget.stHorizontal > div {
+            min-width: 48% !important;
+            flex: 1 1 48% !important;
+        }
     }
     </style>
     """, unsafe_allow_html=True)
