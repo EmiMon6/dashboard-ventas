@@ -334,15 +334,20 @@ st.markdown("""
             width: 100% !important;
         }
         
-        /* CRITICAL: Disable chart interactions on mobile to prevent zoom while scrolling */
-        /* Charts become static images - only fullscreen button works */
-        .js-plotly-plot .plotly .main-svg,
-        .js-plotly-plot .plotly .draglayer,
+        /* MOBILE CHARTS: Keep tooltips, disable only zoom/drag */
+        /* Only disable the drag overlay - NOT the main plot area */
         .js-plotly-plot .plotly .nsewdrag,
-        .js-plotly-plot .plotly .cursor-crosshair,
-        .js-plotly-plot .plotly .drag {
+        .js-plotly-plot .plotly .drag,
+        .js-plotly-plot .plotly .cursor-ew-resize,
+        .js-plotly-plot .plotly .cursor-ns-resize,
+        .js-plotly-plot .plotly .cursor-nesw-resize,
+        .js-plotly-plot .plotly .cursor-nwse-resize {
             pointer-events: none !important;
-            touch-action: none !important;
+        }
+        
+        /* Disable zoom scrolling but allow TOUCH for tooltips */
+        .js-plotly-plot .plotly {
+            touch-action: pan-y pinch-zoom !important;
         }
         
         /* Keep the modebar (toolbar) interactive for fullscreen button */
@@ -356,7 +361,7 @@ st.markdown("""
             pointer-events: auto !important;
         }
         
-        /* Make sure scroll works */
+        /* Make sure page scroll works */
         .stPlotlyChart {
             touch-action: pan-y !important;
         }
