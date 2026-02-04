@@ -334,6 +334,33 @@ st.markdown("""
             width: 100% !important;
         }
         
+        /* CRITICAL: Disable chart interactions on mobile to prevent zoom while scrolling */
+        /* Charts become static images - only fullscreen button works */
+        .js-plotly-plot .plotly .main-svg,
+        .js-plotly-plot .plotly .draglayer,
+        .js-plotly-plot .plotly .nsewdrag,
+        .js-plotly-plot .plotly .cursor-crosshair,
+        .js-plotly-plot .plotly .drag {
+            pointer-events: none !important;
+            touch-action: none !important;
+        }
+        
+        /* Keep the modebar (toolbar) interactive for fullscreen button */
+        .js-plotly-plot .modebar {
+            pointer-events: auto !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+        }
+        
+        .js-plotly-plot .modebar-btn {
+            pointer-events: auto !important;
+        }
+        
+        /* Make sure scroll works */
+        .stPlotlyChart {
+            touch-action: pan-y !important;
+        }
+        
         /* Images and media */
         img, video, iframe {
             max-width: 100% !important;
