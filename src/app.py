@@ -334,35 +334,18 @@ st.markdown("""
             width: 100% !important;
         }
         
-        /* MOBILE CHARTS: Keep tooltips, disable only zoom/drag */
-        /* Only disable the drag overlay - NOT the main plot area */
-        .js-plotly-plot .plotly .nsewdrag,
-        .js-plotly-plot .plotly .drag,
-        .js-plotly-plot .plotly .cursor-ew-resize,
-        .js-plotly-plot .plotly .cursor-ns-resize,
-        .js-plotly-plot .plotly .cursor-nesw-resize,
-        .js-plotly-plot .plotly .cursor-nwse-resize {
-            pointer-events: none !important;
+        /* MOBILE CHARTS: Allow tap for tooltips, but prevent zoom on scroll */
+        /* touch-action: pan-y allows vertical scrolling through the chart */
+        /* Without triggering chart zoom/pan interactions */
+        .js-plotly-plot,
+        .js-plotly-plot .plotly,
+        .js-plotly-plot .svg-container,
+        .stPlotlyChart > div {
+            touch-action: pan-y !important;
         }
         
-        /* Disable zoom scrolling but allow TOUCH for tooltips */
-        .js-plotly-plot .plotly {
-            touch-action: pan-y pinch-zoom !important;
-        }
-        
-        /* Keep the modebar (toolbar) interactive for fullscreen button */
-        .js-plotly-plot .modebar {
-            pointer-events: auto !important;
-            opacity: 1 !important;
-            visibility: visible !important;
-        }
-        
-        .js-plotly-plot .modebar-btn {
-            pointer-events: auto !important;
-        }
-        
-        /* Make sure page scroll works */
-        .stPlotlyChart {
+        /* Disable the drag/zoom overlays that capture scroll events */
+        .js-plotly-plot .plotly .nsewdrag {
             touch-action: pan-y !important;
         }
         
@@ -524,64 +507,52 @@ df = load_data(DATA_PATH)
 if df.empty:
     st.warning(f"No se encontraron datos en {DATA_PATH}. Por favor carga un archivo CSV en la sección de Configuración.")
 
-# Mobile-Friendly Navigation - Buttons at Top
-# Main title in sidebar (for branding on desktop)
+# Sidebar Navigation - Hierarchical Menu
 st.sidebar.title("📊 Dashboard de Ventas")
 
-# MAIN NAVIGATION - Horizontal radio buttons at TOP (mobile-friendly)
-# Using shorter emoji-first labels for mobile
-st.markdown("---")
-main_sections_short = ["📊 General", "📢 Alertas", "👥 Clientes", "📦 Productos", "📁 Categ.", "🔮 ML", "⚙️ Config"]
-main_sections_full = ["📊 Visión General", "📢 Recordatorios", "👥 Clientes", "📦 Productos", "📁 Categorías", "🔮 Predicciones ML", "⚙️ Configuración"]
-
-selected_short = st.radio("Navegación:", main_sections_short, horizontal=True, label_visibility="collapsed", key="main_nav")
-selected_idx = main_sections_short.index(selected_short)
-selected_section = main_sections_full[selected_idx]
-
-st.markdown("---")
+# Main section selector
+main_sections = ["📊 Visión General", "📢 Recordatorios", "👥 Clientes", "📦 Productos", "📁 Categorías", "🔮 Predicciones ML", "⚙️ Configuración"]
+selected_section = st.sidebar.radio("Sección:", main_sections, label_visibility="collapsed")
 
 # Sub-section selectors based on main section
 selected_view = selected_section  # Default
-client_search = ""
-product_search = ""
 
 if selected_section == "👥 Clientes":
-    client_options_short = ["🔍 Buscar", "👤 Explor.", "🎯 RFM", "⏰ Inact."]
-    client_options_full = ["🔍 Buscador", "👤 Explorador", "🎯 Segmentación RFM", "⏰ Inactivos"]
+    st.sidebar.markdown("---")
+    client_options = ["🔍 Buscador", "👤 Explorador", "🎯 Segmentación RFM", "⏰ Inactivos"]
+    selected_sub = st.sidebar.radio("Sub-sección Clientes:", client_options, label_visibility="collapsed")
+    selected_view = f"Clientes_{selected_sub}"
     
-    selected_client = st.radio("Sub-sección:", client_options_short, horizontal=True, label_visibility="collapsed", key="client_sub")
-    client_idx = client_options_short.index(selected_client)
-    selected_view = f"Clientes_{client_options_full[client_idx]}"
-    
-    # Search box
-    client_search = st.text_input("🔎 Buscar cliente:", placeholder="Ej: Textiles...")
+    # Client search box
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔎 Buscar Cliente:**")
+    client_search = st.sidebar.text_input("Nombre del cliente:", placeholder="Ej: Textiles...", label_visibility="collapsed")
 
 elif selected_section == "📦 Productos":
-    product_options_short = ["🏆 Top", "📉 Sin Mov.", "⏳ Recencia"]
-    product_options_full = ["🏆 Top Productos", "📉 Sin Movimiento", "⏳ Análisis Recencia"]
+    st.sidebar.markdown("---")
+    product_options = ["🏆 Top Productos", "📉 Sin Movimiento", "⏳ Análisis Recencia"]
+    selected_sub = st.sidebar.radio("Sub-sección Productos:", product_options, label_visibility="collapsed")
+    selected_view = f"Productos_{selected_sub}"
     
-    selected_prod = st.radio("Sub-sección:", product_options_short, horizontal=True, label_visibility="collapsed", key="prod_sub")
-    prod_idx = product_options_short.index(selected_prod)
-    selected_view = f"Productos_{product_options_full[prod_idx]}"
-    
-    # Search box  
-    product_search = st.text_input("🔎 Buscar producto:", placeholder="Ej: Tela Popelina...", key="product_search")
+    # Product search box
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**🔎 Buscar Producto:**")
+    product_search = st.sidebar.text_input("Nombre del producto:", placeholder="Ej: Tela Popelina...", label_visibility="collapsed", key="product_search")
 
 elif selected_section == "📁 Categorías":
-    cat_options_short = ["📊 Por Categ.", "📦 Agrupadas"]
-    cat_options_full = ["📊 Por Categoría", "📦 Agrupadas"]
-    
-    selected_cat = st.radio("Sub-sección:", cat_options_short, horizontal=True, label_visibility="collapsed", key="cat_sub")
-    cat_idx = cat_options_short.index(selected_cat)
-    selected_view = f"Categorías_{cat_options_full[cat_idx]}"
+    st.sidebar.markdown("---")
+    category_options = ["📊 Por Categoría", "📦 Agrupadas"]
+    selected_sub = st.sidebar.radio("Sub-sección Categorías:", category_options, label_visibility="collapsed")
+    selected_view = f"Categorías_{selected_sub}"
 
 elif selected_section == "🔮 Predicciones ML":
-    ml_options_short = ["📈 Ventas", "📉 Churn", "🛒 Asoc.", "📦 Demanda", "💰 CLV", "🗓️ Estac.", "⏰ Próx."]
-    ml_options_full = ["📈 Ventas Futuras", "📉 Riesgo de Churn", "🛒 Productos Asociados", "📦 Demanda por Producto", "💰 Valor del Cliente", "🗓️ Estacionalidad", "⏰ Próxima Compra"]
-    
-    selected_ml = st.radio("Sub-sección:", ml_options_short, horizontal=True, label_visibility="collapsed", key="ml_sub")
-    ml_idx = ml_options_short.index(selected_ml)
-    selected_view = f"ML_{ml_options_full[ml_idx]}"
+    st.sidebar.markdown("---")
+    ml_options = ["📈 Ventas Futuras", "📉 Riesgo de Churn", "🛒 Productos Asociados", "📦 Demanda por Producto", "💰 Valor del Cliente", "🗓️ Estacionalidad", "⏰ Próxima Compra"]
+    selected_sub = st.sidebar.radio("Sub-sección ML:", ml_options, label_visibility="collapsed")
+    selected_view = f"ML_{selected_sub}"
+else:
+    client_search = ""  # Initialize for non-client sections
+    product_search = ""  # Initialize for non-product sections
 
 # Sidebar Filters (Global)
 st.sidebar.markdown("---")
